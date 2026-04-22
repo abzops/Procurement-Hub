@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stack n Stock Procurement Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    
+    <header class="launch-header">
+      <div class="launch-header-main">
+        <div class="brand-stack">
+          <div class="brand-copy">
+            <div class="brand-inline">
+              <img src="stacknstock-logo.png" alt="Stack n Stock logo" class="brand-inline-logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';" />
+              <span class="brand-inline-fallback" style="display:none;">STACK N STOCK</span>
+            </div>
+            <h1>Procurement Hub</h1>
+            <p class="subtitle">Manage purchase orders, delivery, payments, vendors, and sourcing decisions from one clean workspace.</p>
+          </div>
+        </div>
+
+        <div class="launch-actions">
+          <button class="primary-btn launch-primary" id="openAddPoBtn">+ Add Purchase Order</button>
+          <div class="utility-actions">
+            <button class="ghost-btn" id="exportStateBtn">Export Local</button>
+            <button class="ghost-btn" id="exportFullDataBtn">Export Full</button>
+            <label class="ghost-btn file-btn">
+              Import Data
+              <input type="file" id="importStateInput" accept="application/json" hidden />
+            </label>
+          </div>
+        </div>
+      </div>
+    </header>
+
+
+    <section class="kpi-grid" id="kpiGrid"></section>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="purchase-orders">Purchase Orders</button>
+      <button class="tab" data-tab="products">Products</button>
+      <button class="tab" data-tab="vendors">Vendors</button>
+      <button class="tab" data-tab="vendor-metrics">Vendor Metrics</button>
+    </nav>
+
+    <main>
+      <section class="tab-panel active" id="overview">
+        <div class="overview-grid">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Recent Purchase Orders</h2>
+                <p class="section-copy">Latest PO summaries with quick item access.</p>
+              </div>
+            </div>
+            <div id="recentPOs" class="stack-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Vendor Spend</h2>
+                <p class="section-copy">Top vendors by PO value.</p>
+              </div>
+            </div>
+            <div id="vendorSpendBars" class="bar-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Payment Mix</h2>
+                <p class="section-copy">All purchase orders grouped by payment status.</p>
+              </div>
+            </div>
+            <div id="paymentMix" class="status-grid"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Delivery Mix</h2>
+                <p class="section-copy">Delivery status at PO level.</p>
+              </div>
+            </div>
+            <div id="deliveryMix" class="status-grid"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="purchase-orders">
+        <article class="panel">
+          <div class="panel-header wrap">
+            <div>
+              <h2>Purchase Orders</h2>
+              <p class="section-copy">Main list shows one row per PO. Click the products button to see the full line-item popup.</p>
+            </div>
+            <div class="toolbar">
+              <input class="control-input control-wide" id="poSearch" type="search" placeholder="Search PO, vendor, GSTIN, item..." />
+              <select class="control-input" id="poVendorFilter"></select>
+              <select class="control-input" id="poPaymentFilter"></select>
+              <select class="control-input" id="poStatusFilter"></select>
+              <select class="control-input" id="poDeliveryFilter"></select>
+              <select class="control-input" id="poSortSelect"></select>
+            </div>
+          </div>
+
+          <div class="po-board-head desktop-only">
+            <div>PO</div>
+            <div>Vendor</div>
+            <div>Products</div>
+            <div>Total</div>
+            <div>Payment</div>
+            <div>PO Status</div>
+            <div>Delivery</div>
+            <div>Actions</div>
+          </div>
+
+          <div id="poList" class="po-board"></div>
+        </article>
+      </section>
+
+      <section class="tab-panel" id="products">
+        <article class="panel">
+          <div class="panel-header wrap">
+            <div>
+              <h2>Product Master</h2>
+              <p class="section-copy">Historical product view across all POs. Lowest historical unit rate is shown as best price.</p>
+            </div>
+            <div class="toolbar">
+              <input class="control-input control-wide" id="productSearch" type="search" placeholder="Search product..." />
+              <select class="control-input" id="productSortSelect"></select>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead id="productTableHead"></thead>
+              <tbody id="productTableBody"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="tab-panel" id="vendors">
+        <div class="grid vendor-grid">
+          <article class="panel">
+            <div class="panel-header wrap">
+              <div>
+                <h2>Vendor Directory</h2>
+                <p class="section-copy">Click a vendor to update contact details and defaults.</p>
+              </div>
+              <div class="toolbar">
+                <input class="control-input control-wide" id="vendorSearch" type="search" placeholder="Search vendor..." />
+                <select class="control-input" id="vendorSortSelect"></select>
+              </div>
+            </div>
+            <div class="table-wrap compact">
+              <table>
+                <thead id="vendorTableHead"></thead>
+                <tbody id="vendorTableBody"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel sticky-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Vendor Details</h2>
+                <p class="section-copy" id="selectedVendorLabel">Select a vendor</p>
+              </div>
+            </div>
+            <form id="vendorForm" class="form-grid"></form>
+          </article>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="vendor-metrics">
+        <div class="grid metrics-grid">
+          <article class="panel">
+            <div class="panel-header wrap">
+              <div>
+                <h2>Metric Products</h2>
+                <p class="section-copy">Select a product to compare all vendors for that product.</p>
+              </div>
+              <div class="toolbar">
+                <input class="control-input control-wide" id="metricProductSearch" type="search" placeholder="Search product..." />
+                <select class="control-input" id="metricSortSelect"></select>
+              </div>
+            </div>
+            <div class="table-wrap compact">
+              <table>
+                <thead id="metricProductTableHead"></thead>
+                <tbody id="metricProductTableBody"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel sticky-panel">
+            <div class="panel-header wrap">
+              <div>
+                <h2>Vendor Comparison</h2>
+                <p class="section-copy" id="selectedMetricProductLabel">Select a product</p>
+              </div>
+              <div class="toolbar">
+                <button class="ghost-btn small-btn" id="openAddMetricVendorBtn" type="button">+ Add Vendor For Product</button>
+              </div>
+            </div>
+            <div id="metricEditor"></div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop hidden" id="poModalBackdrop">
+    <div class="modal-shell modal-wide">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">PURCHASE ORDER</p>
+          <h3 id="poModalTitle">Add Purchase Order</h3>
+          <p class="section-copy" id="poModalSubtext">Create one PO with one or more product lines.</p>
+        </div>
+        <button class="icon-btn" id="closePoModalBtn" type="button" aria-label="Close">&times;</button>
+      </div>
+
+      <form id="poForm" class="po-form">
+        <div class="form-grid">
+          <label class="field">
+            <span>PO Date</span>
+            <input class="control-input" type="date" name="poDate" required />
+          </label>
+          <label class="field">
+            <span>PO Number</span>
+            <input class="control-input" type="text" name="poNumber" required placeholder="PO-00025" />
+          </label>
+          <label class="field">
+            <span>Vendor Name</span>
+            <input class="control-input" type="text" name="vendorName" required placeholder="Vendor name" />
+          </label>
+          <label class="field">
+            <span>Source</span>
+            <input class="control-input" type="text" name="source" placeholder="KL / MH / GJ..." />
+          </label>
+          <label class="field">
+            <span>GSTIN</span>
+            <input class="control-input" type="text" name="gstin" placeholder="GSTIN" />
+          </label>
+          <label class="field">
+            <span>Delivery Date</span>
+            <input class="control-input" type="date" name="deliveryDate" />
+          </label>
+          <label class="field">
+            <span>Payment Status</span>
+            <select class="control-input" name="paymentStatus">
+              <option>Unknown</option>
+              <option>Paid</option>
+              <option>Partially Paid</option>
+              <option>Pending</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>PO Status</span>
+            <select class="control-input" name="poStatus">
+              <option>Issued</option>
+              <option>Billed</option>
+              <option>Closed</option>
+              <option>Unknown</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Delivery Status</span>
+            <select class="control-input" name="deliveryStatus">
+              <option>Unknown</option>
+              <option>Not Delivered</option>
+              <option>In Transit</option>
+              <option>Partially Delivered</option>
+              <option>Delivered</option>
+              <option>Delayed</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Terms / Notes</span>
+            <textarea name="terms" placeholder="Payment terms, delivery notes, quality notes..."></textarea>
+          </label>
+        </div>
+
+        <div class="subsection">
+          <div class="line-header">
+            <div>
+              <h3>PO Products</h3>
+              <p class="section-copy">Product lines are kept inside the PO and shown in the popup.</p>
+            </div>
+            <button type="button" class="ghost-btn small-btn" id="addLineBtn">+ Add Product Line</button>
+          </div>
+          <div id="poLineItems" class="line-items"></div>
+        </div>
+
+        <div class="summary-strip" id="poSummaryStrip">
+          <div class="summary-chip"><span>Item Total</span><strong id="summaryItemTotal">₹0.00</strong></div>
+          <div class="summary-chip"><span>Tax Total</span><strong id="summaryTaxTotal">₹0.00</strong></div>
+          <div class="summary-chip summary-accent"><span>PO Total</span><strong id="summaryPoTotal">₹0.00</strong></div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="ghost-btn" id="cancelPoBtn">Cancel</button>
+          <button type="submit" class="primary-btn" id="savePoBtn">Save Purchase Order</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="detailModalBackdrop">
+    <div class="modal-shell modal-medium">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">PO PRODUCTS</p>
+          <h3 id="detailModalTitle">PO Details</h3>
+          <p class="section-copy" id="detailModalSubtext">Full product list and header details.</p>
+        </div>
+        <button class="icon-btn" id="closeDetailModalBtn" type="button" aria-label="Close">&times;</button>
+      </div>
+      <div id="detailModalContent"></div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
