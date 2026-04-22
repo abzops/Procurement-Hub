@@ -1,0 +1,4 @@
+Current web app mode:
+- Works immediately as a static GitHub Pages site using local data/local storage.
+- Supabase schema + seed files are included in ../supabase.
+- After you configure Supabase, the next step is wiring CRUD from app.js to Supabase APIs.

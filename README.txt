@@ -51,3 +51,9 @@ Header logo update:
 - Removed the boxed logo area from the header
 - Logo is now placed inline in the brand strip area
 - Included file: stacknstock-logo.png
+
+
+Supabase live mode:
+- config.js is prefilled with the project URL and publishable key
+- app.js now loads from Supabase on startup and syncs changes back to Supabase
+- For GitHub Pages, upload all files in this folder to repo root and commit

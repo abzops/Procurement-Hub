@@ -7,8 +7,8 @@ const STORAGE_KEYS = {
   deletedVendors: 'sns-deleted-vendors-v1'
 };
 
-const baseRows = Array.isArray(window.STACKNSTOCK_DATA?.rows) ? window.STACKNSTOCK_DATA.rows : [];
-const vendorSeeds = Array.isArray(window.STACKNSTOCK_DATA?.vendorSeeds) ? window.STACKNSTOCK_DATA.vendorSeeds : [];
+let baseRows = Array.isArray(window.STACKNSTOCK_DATA?.rows) ? window.STACKNSTOCK_DATA.rows : [];
+let vendorSeeds = Array.isArray(window.STACKNSTOCK_DATA?.vendorSeeds) ? window.STACKNSTOCK_DATA.vendorSeeds : [];
 
 const PRODUCT_SORTS = [
   { value: 'totalSpend-desc', label: 'Sort: Highest Spend' },
@@ -137,6 +137,286 @@ const state = {
   }
 };
 
+const snsConfig = window.SNS_CONFIG || {};
+const useSupabase = Boolean(snsConfig.useSupabase && snsConfig.supabaseUrl && snsConfig.supabaseAnonKey && window.supabase?.createClient);
+const supabaseClient = useSupabase ? window.supabase.createClient(snsConfig.supabaseUrl, snsConfig.supabaseAnonKey) : null;
+let remoteSyncTimer = null;
+let remoteSyncInFlight = false;
+
+function safeDate(value) {
+  const text = cleanText(value);
+  return text || null;
+}
+
+function toNumeric(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
+}
+
+async function loadRemoteStateFromSupabase() {
+  if (!useSupabase) return false;
+
+  const [vendorsRes, poRes, linesRes, metricsRes] = await Promise.all([
+    supabaseClient.from('vendors').select('*').order('vendor_name'),
+    supabaseClient.from('purchase_orders').select('*').order('po_date', { ascending: false }),
+    supabaseClient.from('po_lines').select('*').order('po_date', { ascending: false }),
+    supabaseClient.from('product_vendor_metrics').select('*').order('product_name')
+  ]);
+
+  const errors = [vendorsRes.error, poRes.error, linesRes.error, metricsRes.error].filter(Boolean);
+  if (errors.length) {
+    console.error('Supabase load error', errors);
+    alert('Supabase connection loaded with errors. Falling back to local mode for this session.');
+    return false;
+  }
+
+  const vendors = vendorsRes.data || [];
+  const lines = linesRes.data || [];
+  const metrics = metricsRes.data || [];
+
+  vendorSeeds = vendors
+    .filter(v => !v.is_deleted)
+    .map(v => ({
+      vendorName: v.vendor_name,
+      source: v.source || '',
+      gstin: v.gstin || '',
+      contactPerson: v.contact_person || '',
+      phone: v.phone || '',
+      email: v.email || '',
+      website: v.website || '',
+      city: v.city || '',
+      defaultLeadTimeDays: v.default_lead_time_days || '',
+      rating: v.rating || '',
+      notes: v.notes || ''
+    }));
+
+  baseRows = lines.map(line => ({
+    id: line.line_id,
+    poDate: line.po_date || '',
+    deliveryDate: line.delivery_date || '',
+    deliveryStatus: line.delivery_status || '',
+    poNumber: line.po_number,
+    reference: '',
+    poStatus: line.po_status || '',
+    vendorName: line.vendor_name || '',
+    hsnSac: '',
+    source: line.source || '',
+    gstin: line.gstin || '',
+    referenceNo: '',
+    terms: line.terms || '',
+    itemPrice: Number(line.item_price || 0),
+    itemDesc: line.item_desc || '',
+    quantityOrdered: Number(line.quantity_ordered || 0),
+    itemTax: line.item_tax_percent ? `GST${line.item_tax_percent}` : '',
+    itemTaxPercent: Number(line.item_tax_percent || 0),
+    itemTaxAmount: Number(line.item_tax_amount || 0),
+    itemTotal: Number(line.item_total || 0),
+    total: null,
+    paymentStatus: line.payment_status || '',
+    balanceDue: line.balance_due,
+    manual: Boolean(line.manual),
+    lineType: line.line_type || 'product'
+  }));
+
+  // set po total on first line of each PO so existing grouping logic can keep using it
+  const poMap = new Map((poRes.data || []).map(po => [po.po_number, po]));
+  const firstIndexByPo = new Map();
+  baseRows.forEach((row, idx) => {
+    if (!firstIndexByPo.has(row.poNumber)) firstIndexByPo.set(row.poNumber, idx);
+  });
+  firstIndexByPo.forEach((idx, poNumber) => {
+    if (poMap.has(poNumber)) baseRows[idx].total = Number(poMap.get(poNumber).po_total || 0);
+  });
+
+  state.manualRows = [];
+  state.rowOverrides = {};
+  state.vendorContacts = mergeVendorSeeds(Object.fromEntries(vendors.filter(v => !v.is_deleted).map(v => [cleanText(v.vendor_name), {
+    vendorName: v.vendor_name,
+    source: v.source || '',
+    gstin: v.gstin || '',
+    contactPerson: v.contact_person || '',
+    phone: v.phone || '',
+    email: v.email || '',
+    website: v.website || '',
+    city: v.city || '',
+    defaultLeadTimeDays: v.default_lead_time_days || '',
+    rating: v.rating || '',
+    notes: v.notes || ''
+  }])));
+  state.productVendorMetrics = Object.fromEntries(metrics.map(m => [m.metric_key, {
+    productName: m.product_name,
+    vendorName: m.vendor_name,
+    quotedPrice: m.quoted_price == null ? '' : String(m.quoted_price),
+    leadTimeDays: m.lead_time_days || '',
+    moq: m.moq || '',
+    rating: m.rating || '',
+    notes: m.notes || '',
+    source: m.source || '',
+    gstin: m.gstin || ''
+  }]));
+  state.deletedVendors = vendors.filter(v => v.is_deleted).map(v => v.vendor_name);
+  return true;
+}
+
+async function syncStateToSupabase() {
+  if (!useSupabase || remoteSyncInFlight) return;
+  remoteSyncInFlight = true;
+  try {
+    const derived = buildDerived();
+    const allRowsData = allRows();
+
+    const vendorNames = new Set([
+      ...Object.keys(state.vendorContacts || {}).map(cleanText),
+      ...derived.vendors.map(v => cleanText(v.vendorName)),
+      ...allRowsData.map(r => cleanText(r.vendorName))
+    ]);
+
+    const vendorsPayload = Array.from(vendorNames)
+      .filter(Boolean)
+      .map(vendorName => {
+        const contact = state.vendorContacts[vendorName] || {};
+        const derivedVendor = derived.vendors.find(v => cleanText(v.vendorName) === vendorName) || {};
+        return {
+          vendor_name: vendorName,
+          source: cleanText(contact.source || derivedVendor.source || ''),
+          gstin: cleanText(contact.gstin || derivedVendor.gstin || ''),
+          contact_person: cleanText(contact.contactPerson || ''),
+          phone: cleanText(contact.phone || ''),
+          email: cleanText(contact.email || ''),
+          website: cleanText(contact.website || ''),
+          city: cleanText(contact.city || ''),
+          default_lead_time_days: cleanText(contact.defaultLeadTimeDays || ''),
+          rating: cleanText(contact.rating || ''),
+          notes: contact.notes || '',
+          is_deleted: isVendorDeleted(vendorName)
+        };
+      });
+
+    const poPayload = derived.pos.map(po => ({
+      po_number: po.poNumber,
+      po_date: safeDate(po.poDate),
+      vendor_name: po.vendorName,
+      source: po.source || '',
+      gstin: po.gstin || '',
+      delivery_date: safeDate(po.deliveryDate),
+      payment_status: po.paymentStatus || '',
+      po_status: po.poStatus || '',
+      delivery_status: po.deliveryStatus || '',
+      terms: po.terms || '',
+      po_total: toNumeric(po.poTotal),
+      item_count: Number(po.itemCount || 0),
+      product_count: Number(po.productCount || 0),
+      charge_count: Number(po.chargeCount || 0),
+      total_qty: toNumeric(po.totalQty),
+      total_charge_value: toNumeric(po.totalChargeValue),
+      reference_no: ''
+    }));
+
+    const linePayload = allRowsData.map(line => ({
+      line_id: line.id,
+      po_number: line.poNumber,
+      vendor_name: line.vendorName,
+      po_date: safeDate(line.poDate),
+      delivery_date: safeDate(line.deliveryDate),
+      payment_status: line.paymentStatus || '',
+      po_status: line.poStatus || '',
+      delivery_status: line.deliveryStatus || '',
+      line_type: line.lineType || inferLineType(line.itemDesc, line.lineType),
+      is_charge: Boolean(line.isCharge),
+      item_desc: line.itemDesc,
+      quantity_ordered: toNumeric(line.quantityOrdered),
+      item_price: toNumeric(line.itemPrice),
+      item_tax_percent: toNumeric(line.itemTaxPercent),
+      item_tax_amount: toNumeric(line.itemTaxAmount),
+      item_total: toNumeric(line.itemTotal),
+      line_grand_total: toNumeric(line.lineGrandTotal),
+      balance_due: toNumeric(line.balanceDue),
+      terms: line.terms || '',
+      source: line.source || '',
+      gstin: line.gstin || '',
+      manual: Boolean(line.manual)
+    }));
+
+    const metricsPayload = Object.entries(state.productVendorMetrics || {}).map(([metricKey, metric]) => ({
+      metric_key: metricKey,
+      product_name: cleanText(metric.productName || splitMetricStorageKey(metricKey).productName),
+      vendor_name: cleanText(metric.vendorName || splitMetricStorageKey(metricKey).vendorName),
+      quoted_price: metric.quotedPrice === '' ? null : toNumeric(metric.quotedPrice),
+      lead_time_days: cleanText(metric.leadTimeDays || ''),
+      moq: cleanText(metric.moq || ''),
+      rating: cleanText(metric.rating || ''),
+      notes: metric.notes || '',
+      source: cleanText(metric.source || ''),
+      gstin: cleanText(metric.gstin || '')
+    })).filter(x => x.product_name && x.vendor_name);
+
+    // Upsert vendors first for FK safety
+    if (vendorsPayload.length) {
+      const { error } = await supabaseClient.from('vendors').upsert(vendorsPayload, { onConflict: 'vendor_name' });
+      if (error) throw error;
+    }
+
+    // delete removed metrics / lines / pos
+    const [existingMetricsRes, existingLinesRes, existingPOsRes] = await Promise.all([
+      supabaseClient.from('product_vendor_metrics').select('metric_key'),
+      supabaseClient.from('po_lines').select('line_id'),
+      supabaseClient.from('purchase_orders').select('po_number')
+    ]);
+    if (existingMetricsRes.error) throw existingMetricsRes.error;
+    if (existingLinesRes.error) throw existingLinesRes.error;
+    if (existingPOsRes.error) throw existingPOsRes.error;
+
+    const currentMetricKeys = new Set(metricsPayload.map(x => x.metric_key));
+    const removeMetricKeys = (existingMetricsRes.data || []).map(x => x.metric_key).filter(k => !currentMetricKeys.has(k));
+    if (removeMetricKeys.length) {
+      const { error } = await supabaseClient.from('product_vendor_metrics').delete().in('metric_key', removeMetricKeys);
+      if (error) throw error;
+    }
+
+    const currentLineIds = new Set(linePayload.map(x => x.line_id));
+    const removeLineIds = (existingLinesRes.data || []).map(x => x.line_id).filter(k => !currentLineIds.has(k));
+    if (removeLineIds.length) {
+      const { error } = await supabaseClient.from('po_lines').delete().in('line_id', removeLineIds);
+      if (error) throw error;
+    }
+
+    const currentPONumbers = new Set(poPayload.map(x => x.po_number));
+    const removePONumbers = (existingPOsRes.data || []).map(x => x.po_number).filter(k => !currentPONumbers.has(k));
+    if (removePONumbers.length) {
+      const { error } = await supabaseClient.from('purchase_orders').delete().in('po_number', removePONumbers);
+      if (error) throw error;
+    }
+
+    if (poPayload.length) {
+      const { error } = await supabaseClient.from('purchase_orders').upsert(poPayload, { onConflict: 'po_number' });
+      if (error) throw error;
+    }
+
+    if (linePayload.length) {
+      const { error } = await supabaseClient.from('po_lines').upsert(linePayload, { onConflict: 'line_id' });
+      if (error) throw error;
+    }
+
+    if (metricsPayload.length) {
+      const { error } = await supabaseClient.from('product_vendor_metrics').upsert(metricsPayload, { onConflict: 'metric_key' });
+      if (error) throw error;
+    }
+  } catch (error) {
+    console.error('Supabase sync failed', error);
+    alert(`Supabase sync failed: ${error.message || error}`);
+  } finally {
+    remoteSyncInFlight = false;
+  }
+}
+
+function scheduleRemoteSync() {
+  if (!useSupabase) return;
+  clearTimeout(remoteSyncTimer);
+  remoteSyncTimer = setTimeout(() => {
+    syncStateToSupabase();
+  }, 250);
+}
+
 function loadJson(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
@@ -152,6 +432,7 @@ function saveState() {
   localStorage.setItem(STORAGE_KEYS.vendorContacts, JSON.stringify(state.vendorContacts));
   localStorage.setItem(STORAGE_KEYS.productVendorMetrics, JSON.stringify(state.productVendorMetrics));
   localStorage.setItem(STORAGE_KEYS.deletedVendors, JSON.stringify(state.deletedVendors));
+  scheduleRemoteSync();
 }
 
 function mergeVendorSeeds(existing) {
@@ -1939,11 +2220,16 @@ function handlePoAction(event) {
   }
 }
 
-function init() {
+async function init() {
   bindTabs();
   bindFilters();
   bindGlobalEvents();
+  if (useSupabase) {
+    await loadRemoteStateFromSupabase();
+  }
   renderAll();
 }
 
-window.addEventListener('DOMContentLoaded', init);
+window.addEventListener('DOMContentLoaded', () => {
+  init();
+});
