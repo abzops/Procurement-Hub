@@ -2159,7 +2159,19 @@ function importLocalState(event) {
         });
         saveState();
         renderAll();
-        alert(`DB JSON imported: ${state.manualRows.length} lines across ${payload.purchase_orders.length} purchase orders.`);
+
+        if (useSupabase) {
+          syncStateToSupabase()
+            .then(() => {
+              alert(`DB JSON imported and synced: ${state.manualRows.length} lines across ${payload.purchase_orders.length} purchase orders.`);
+            })
+            .catch(err => {
+              console.error('Import sync failed', err);
+              alert(`DB JSON imported locally, but Supabase sync failed: ${err.message || err}`);
+            });
+        } else {
+          alert(`DB JSON imported: ${state.manualRows.length} lines across ${payload.purchase_orders.length} purchase orders.`);
+        }
       } else {
         state.manualRows = Array.isArray(payload.manualRows) ? payload.manualRows : state.manualRows;
         state.rowOverrides = payload.rowOverrides && typeof payload.rowOverrides === 'object' ? payload.rowOverrides : state.rowOverrides;
@@ -2168,7 +2180,19 @@ function importLocalState(event) {
         state.deletedVendors = Array.isArray(payload.deletedVendors) ? payload.deletedVendors : state.deletedVendors;
         saveState();
         renderAll();
-        alert('Local data imported.');
+
+        if (useSupabase) {
+          syncStateToSupabase()
+            .then(() => {
+              alert('Local data imported and synced to Supabase.');
+            })
+            .catch(err => {
+              console.error('Import sync failed', err);
+              alert(`Local data imported, but Supabase sync failed: ${err.message || err}`);
+            });
+        } else {
+          alert('Local data imported.');
+        }
       }
     } catch {
       alert('Unable to import this JSON file.');
