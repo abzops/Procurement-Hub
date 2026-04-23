@@ -1889,10 +1889,14 @@ function recalcPoSummary() {
     if (totalMount) totalMount.textContent = money(breakdown.lines[index]?.lineGrandTotal || 0);
   });
 
-  document.getElementById('summaryItemTotal').textContent = money(breakdown.itemSubtotal);
-  document.getElementById('summaryDiscountTotal').textContent = money(breakdown.discountValue);
-  document.getElementById('summaryTaxTotal').textContent = money(breakdown.taxTotal);
-  document.getElementById('summaryBalanceDue').textContent = money(paymentState.balanceDue);
+  const itemTotalEl = document.getElementById('summaryItemTotal');
+  const discountTotalEl = document.getElementById('summaryDiscountTotal');
+  const taxTotalEl = document.getElementById('summaryTaxTotal');
+  const balanceDueEl = document.getElementById('summaryBalanceDue');
+  if (itemTotalEl) itemTotalEl.textContent = money(breakdown.itemSubtotal);
+  if (discountTotalEl) discountTotalEl.textContent = money(breakdown.discountValue);
+  if (taxTotalEl) taxTotalEl.textContent = money(breakdown.taxTotal);
+  if (balanceDueEl) balanceDueEl.textContent = money(paymentState.balanceDue);
 
   const discountTypeInput = document.getElementById('summaryDiscountType');
   const discountInput = document.getElementById('summaryDiscountInput');
@@ -1905,7 +1909,8 @@ function recalcPoSummary() {
   const paymentStatusEl = document.querySelector('#poForm [name="paymentStatus"]');
   if (paymentStatusEl) paymentStatusEl.value = paymentState.paymentStatus;
 
-  document.getElementById('summaryPoTotal').textContent = money(breakdown.grandTotal);
+  const poTotalEl = document.getElementById('summaryPoTotal');
+  if (poTotalEl) poTotalEl.textContent = money(breakdown.grandTotal);
 }
 
 function collectPoFormPayload(existingPo = null) {
