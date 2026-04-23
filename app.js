@@ -153,6 +153,83 @@ function toNumeric(value) {
   return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
 }
 
+function roundMoney(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Number(n.toFixed(2)) : 0;
+}
+
+function getDiscountStateFromInputs() {
+  const typeEl = document.getElementById('summaryDiscountType');
+  const inputEl = document.getElementById('summaryDiscountInput');
+  const adjustmentEl = document.getElementById('summaryAdjustmentInput');
+  const discountType = cleanText(typeEl?.value || 'amount').toLowerCase() === 'percent' ? 'percent' : 'amount';
+  const discountInputValue = Math.max(0, number(inputEl?.value));
+  const adjustmentAmount = roundMoney(number(adjustmentEl?.value));
+  return { discountType, discountInputValue, adjustmentAmount };
+}
+
+function calculatePoBreakdown(lines, discountType = 'amount', discountInputValue = 0, adjustmentAmount = 0) {
+  const normalizedLines = (lines || []).map(line => {
+    const quantityOrdered = number(line.quantityOrdered);
+    const itemPrice = number(line.itemPrice);
+    const itemTaxPercent = number(line.itemTaxPercent);
+    const lineBase = roundMoney(quantityOrdered * itemPrice);
+    return {
+      ...line,
+      quantityOrdered,
+      itemPrice,
+      itemTaxPercent,
+      lineBase
+    };
+  });
+
+  const itemSubtotal = roundMoney(normalizedLines.reduce((sum, line) => sum + line.lineBase, 0));
+  const rawDiscountValue = discountType === 'percent'
+    ? itemSubtotal * (number(discountInputValue) / 100)
+    : number(discountInputValue);
+  const discountValue = roundMoney(Math.min(itemSubtotal, Math.max(0, rawDiscountValue)));
+  const taxableSubtotal = roundMoney(itemSubtotal - discountValue);
+
+  let allocatedDiscount = 0;
+  const computedLines = normalizedLines.map((line, index) => {
+    let discountShare = 0;
+    if (itemSubtotal > 0 && discountValue > 0) {
+      if (index === normalizedLines.length - 1) {
+        discountShare = roundMoney(discountValue - allocatedDiscount);
+      } else {
+        discountShare = roundMoney(discountValue * (line.lineBase / itemSubtotal));
+        allocatedDiscount += discountShare;
+      }
+    }
+    const taxableBase = roundMoney(Math.max(0, line.lineBase - discountShare));
+    const taxAmount = roundMoney(taxableBase * (line.itemTaxPercent / 100));
+    const lineGrandTotal = roundMoney(taxableBase + taxAmount);
+    return {
+      ...line,
+      discountShare,
+      taxableBase,
+      itemTotal: line.lineBase,
+      itemTaxAmount: taxAmount,
+      lineGrandTotal
+    };
+  });
+
+  const taxTotal = roundMoney(computedLines.reduce((sum, line) => sum + line.itemTaxAmount, 0));
+  const grandTotal = roundMoney(Math.max(0, taxableSubtotal + taxTotal + number(adjustmentAmount)));
+
+  return {
+    itemSubtotal,
+    discountType,
+    discountInputValue: roundMoney(discountInputValue),
+    discountValue,
+    taxableSubtotal,
+    taxTotal,
+    adjustmentAmount: roundMoney(adjustmentAmount),
+    grandTotal,
+    lines: computedLines
+  };
+}
+
 async function loadRemoteStateFromSupabase() {
   if (!useSupabase) return false;
 
@@ -211,10 +288,14 @@ async function loadRemoteStateFromSupabase() {
     itemTaxPercent: Number(line.item_tax_percent || 0),
     itemTaxAmount: Number(line.item_tax_amount || 0),
     itemTotal: Number(line.item_total || 0),
+    lineGrandTotal: Number(line.line_grand_total || 0),
     total: null,
     paymentStatus: line.payment_status || '',
     balanceDue: line.balance_due,
     discountAmount: 0,
+    discountType: 'amount',
+    discountInputValue: 0,
+    adjustmentAmount: 0,
     manual: Boolean(line.manual),
     lineType: line.line_type || 'product'
   }));
@@ -231,6 +312,9 @@ async function loadRemoteStateFromSupabase() {
   baseRows.forEach(row => {
     const po = poMap.get(row.poNumber);
     row.discountAmount = Number(po?.discount_amount || 0);
+    row.discountType = cleanText(po?.discount_type || 'amount').toLowerCase() === 'percent' ? 'percent' : 'amount';
+    row.discountInputValue = Number(po?.discount_input_value ?? po?.discount_amount ?? 0);
+    row.adjustmentAmount = Number(po?.adjustment_amount || 0);
   });
 
   state.manualRows = [];
@@ -310,6 +394,9 @@ async function syncStateToSupabase() {
       terms: po.terms || '',
       po_total: toNumeric(po.poTotal),
       discount_amount: toNumeric(po.discountAmount),
+      discount_type: po.discountType || 'amount',
+      discount_input_value: toNumeric(po.discountInputValue),
+      adjustment_amount: toNumeric(po.adjustmentAmount),
       item_count: Number(po.itemCount || 0),
       product_count: Number(po.productCount || 0),
       charge_count: Number(po.chargeCount || 0),
@@ -598,6 +685,9 @@ function materializeRow(row) {
   const itemTaxAmount = number(row.itemTaxAmount) || (itemTotal * (number(row.itemTaxPercent) / 100));
   const lineType = inferLineType(row.itemDesc, row.lineType);
   const discountAmount = Math.max(0, number(row.discountAmount));
+  const discountType = cleanText(row.discountType || 'amount').toLowerCase() === 'percent' ? 'percent' : 'amount';
+  const discountInputValue = Math.max(0, number(row.discountInputValue ?? (discountType === 'amount' ? discountAmount : 0)));
+  const adjustmentAmount = number(row.adjustmentAmount);
   return {
     ...row,
     id: cleanText(row.id) || uid('row'),
@@ -614,8 +704,11 @@ function materializeRow(row) {
     itemTaxPercent: number(row.itemTaxPercent),
     itemTotal,
     itemTaxAmount,
-    lineGrandTotal: itemTotal + itemTaxAmount,
+    lineGrandTotal: number(row.lineGrandTotal) || (itemTotal + itemTaxAmount),
     discountAmount,
+    discountType,
+    discountInputValue,
+    adjustmentAmount,
     lineType,
     isCharge: lineType === 'charge',
     paymentStatus: normalizePaymentStatus(row.paymentStatus),
@@ -722,11 +815,20 @@ function groupedPOs(rows) {
     const chargeItems = items.filter(item => item.isCharge);
     const groupedItems = groupedPoItems(productItems);
     const groupedCharges = groupedPoItems(chargeItems);
-    const grossTotal = items.reduce((sum, item) => sum + number(item.lineGrandTotal), 0);
+    const itemSubtotal = roundMoney(items.reduce((sum, item) => sum + number(item.itemTotal), 0));
+    const taxTotal = roundMoney(items.reduce((sum, item) => sum + number(item.itemTaxAmount), 0));
+    const grossTotal = roundMoney(itemSubtotal + taxTotal);
     const providedDiscounts = [...new Set(items.map(item => Math.max(0, number(item.discountAmount))).filter(value => value > 0))];
+    const providedDiscountTypes = uniqueMeaningful(items.map(item => item.discountType));
+    const providedDiscountInputs = [...new Set(items.map(item => Math.max(0, number(item.discountInputValue))).filter(value => value > 0))];
+    const providedAdjustments = [...new Set(items.map(item => number(item.adjustmentAmount)).filter(value => value !== 0))];
     const providedTotals = [...new Set(items.map(item => number(item.total)).filter(value => value > 0))];
     const discountAmount = providedDiscounts.length ? providedDiscounts[0] : 0;
-    const poTotal = providedTotals.length === 1 ? providedTotals[0] : Math.max(0, grossTotal - discountAmount);
+    const discountType = providedDiscountTypes.length ? providedDiscountTypes[0] : 'amount';
+    const discountInputValue = providedDiscountInputs.length ? providedDiscountInputs[0] : discountAmount;
+    const adjustmentAmount = providedAdjustments.length ? providedAdjustments[0] : 0;
+    const taxableSubtotal = roundMoney(itemSubtotal - discountAmount);
+    const poTotal = providedTotals.length === 1 ? providedTotals[0] : Math.max(0, taxableSubtotal + taxTotal + adjustmentAmount);
     const totalQty = productItems.reduce((sum, item) => sum + number(item.quantityOrdered), 0);
     const totalChargeValue = chargeItems.reduce((sum, item) => sum + number(item.lineGrandTotal), 0);
     const searchBlob = [
@@ -754,7 +856,13 @@ function groupedPOs(rows) {
       chargeCount: groupedCharges.length,
       totalQty,
       totalChargeValue,
+      itemSubtotal,
+      taxTotal,
+      discountType,
+      discountInputValue,
       discountAmount,
+      adjustmentAmount,
+      taxableSubtotal,
       grossTotal,
       poTotal,
       items,
@@ -1523,15 +1631,16 @@ function createLineItemCard(values = {}) {
       </label>
       <div class="metric-block">
         <div class="metric-label">Line Total</div>
-        <div class="metric-value" data-line-total>${money(lineGrandTotal(materializeRow({
+        <div class="metric-value" data-line-total>${money(materializeRow({
           quantityOrdered: values.quantityOrdered ?? 1,
           itemPrice: values.itemPrice ?? 0,
           itemTaxPercent: values.itemTaxPercent ?? 18,
           itemTotal: values.itemTotal ?? 0,
           itemTaxAmount: values.itemTaxAmount ?? 0,
+          lineGrandTotal: values.lineGrandTotal ?? 0,
           itemDesc: values.itemDesc || '',
           lineType
-        })))}</div>
+        }).lineGrandTotal)}</div>
       </div>
     </div>
   `;
@@ -1550,14 +1659,19 @@ function openPoModal(po = null) {
   linesMount.innerHTML = '';
   if (po) {
     title.textContent = `Edit ${po.poNumber}`;
-    subtext.textContent = `Update PO header details, discount, products, and charge lines for ${po.vendorName}.`;
+    subtext.textContent = `Update PO header details, amount/percent discount, adjustment, products, and charge lines for ${po.vendorName}.`;
     form.elements.poDate.value = po.poDate || '';
     form.elements.poNumber.value = po.poNumber || '';
     form.elements.vendorName.value = po.vendorName || '';
     form.elements.source.value = po.source || '';
     form.elements.gstin.value = po.gstin || '';
     form.elements.deliveryDate.value = po.deliveryDate || '';
-    form.elements.discountAmount.value = number(po.discountAmount) > 0 ? String(number(po.discountAmount)) : '';
+    const discountTypeInput = document.getElementById('summaryDiscountType');
+    const discountValueInput = document.getElementById('summaryDiscountInput');
+    const adjustmentInput = document.getElementById('summaryAdjustmentInput');
+    if (discountTypeInput) discountTypeInput.value = po.discountType || 'amount';
+    if (discountValueInput) discountValueInput.value = String(number(po.discountInputValue || 0));
+    if (adjustmentInput) adjustmentInput.value = String(number(po.adjustmentAmount || 0));
     form.elements.paymentStatus.value = ['Paid', 'Partially Paid', 'Pending', 'Unknown'].includes(po.paymentStatus) ? po.paymentStatus : 'Unknown';
     form.elements.poStatus.value = ['Issued', 'Billed', 'Closed', 'Unknown'].includes(po.poStatus) ? po.poStatus : 'Unknown';
     form.elements.deliveryStatus.value = ['Unknown', 'Not Delivered', 'In Transit', 'Partially Delivered', 'Delivered', 'Delayed'].includes(po.deliveryStatus) ? po.deliveryStatus : 'Unknown';
@@ -1565,8 +1679,13 @@ function openPoModal(po = null) {
     po.items.forEach(item => linesMount.appendChild(createLineItemCard(item)));
   } else {
     title.textContent = 'Add Purchase Order';
-    subtext.textContent = 'Create one PO with discount, product lines, and charge lines.';
-    form.elements.discountAmount.value = '';
+    subtext.textContent = 'Create one PO with amount/percent discount, adjustment, product lines, and charge lines.';
+    const discountTypeInput = document.getElementById('summaryDiscountType');
+    const discountInput = document.getElementById('summaryDiscountInput');
+    const adjustmentInput = document.getElementById('summaryAdjustmentInput');
+    if (discountTypeInput) discountTypeInput.value = 'amount';
+    if (discountInput) discountInput.value = '0';
+    if (adjustmentInput) adjustmentInput.value = '0';
     form.elements.paymentStatus.value = 'Unknown';
     form.elements.poStatus.value = 'Issued';
     form.elements.deliveryStatus.value = 'Unknown';
@@ -1591,24 +1710,31 @@ function refreshLineIndexes() {
 }
 
 function recalcPoSummary() {
-  let itemTotal = 0;
-  let taxTotal = 0;
-  const discountAmount = Math.max(0, number(document.querySelector('#poForm [name="discountAmount"]')?.value));
-  document.querySelectorAll('.line-item-card').forEach(card => {
-    const qty = number(card.querySelector('[name="quantityOrdered"]')?.value);
-    const price = number(card.querySelector('[name="itemPrice"]')?.value);
-    const taxPct = number(card.querySelector('[name="itemTaxPercent"]')?.value);
-    const lineItemTotal = qty * price;
-    const lineTax = lineItemTotal * (taxPct / 100);
-    itemTotal += lineItemTotal;
-    taxTotal += lineTax;
+  const lines = Array.from(document.querySelectorAll('.line-item-card')).map(card => ({
+    quantityOrdered: number(card.querySelector('[name="quantityOrdered"]')?.value),
+    itemPrice: number(card.querySelector('[name="itemPrice"]')?.value),
+    itemTaxPercent: number(card.querySelector('[name="itemTaxPercent"]')?.value)
+  }));
+  const { discountType, discountInputValue, adjustmentAmount } = getDiscountStateFromInputs();
+  const breakdown = calculatePoBreakdown(lines, discountType, discountInputValue, adjustmentAmount);
+
+  document.querySelectorAll('.line-item-card').forEach((card, index) => {
     const totalMount = card.querySelector('[data-line-total]');
-    if (totalMount) totalMount.textContent = money(lineItemTotal + lineTax);
+    if (totalMount) totalMount.textContent = money(breakdown.lines[index]?.lineGrandTotal || 0);
   });
-  document.getElementById('summaryItemTotal').textContent = money(itemTotal);
-  document.getElementById('summaryTaxTotal').textContent = money(taxTotal);
-  document.getElementById('summaryDiscountTotal').textContent = money(discountAmount);
-  document.getElementById('summaryPoTotal').textContent = money(Math.max(0, itemTotal + taxTotal - discountAmount));
+
+  document.getElementById('summaryItemTotal').textContent = money(breakdown.itemSubtotal);
+  document.getElementById('summaryDiscountTotal').textContent = money(breakdown.discountValue);
+  document.getElementById('summaryTaxTotal').textContent = money(breakdown.taxTotal);
+
+  const discountTypeInput = document.getElementById('summaryDiscountType');
+  const discountInput = document.getElementById('summaryDiscountInput');
+  const adjustmentInput = document.getElementById('summaryAdjustmentInput');
+  if (discountTypeInput && document.activeElement !== discountTypeInput) discountTypeInput.value = breakdown.discountType;
+  if (discountInput && document.activeElement !== discountInput) discountInput.value = String(breakdown.discountInputValue);
+  if (adjustmentInput && document.activeElement !== adjustmentInput) adjustmentInput.value = String(breakdown.adjustmentAmount);
+
+  document.getElementById('summaryPoTotal').textContent = money(breakdown.grandTotal);
 }
 
 function collectPoFormPayload(existingPo = null) {
@@ -1619,41 +1745,36 @@ function collectPoFormPayload(existingPo = null) {
   const source = cleanText(form.elements.source.value);
   const gstin = cleanText(form.elements.gstin.value);
   const deliveryDate = form.elements.deliveryDate.value;
-  const discountAmount = Math.max(0, number(form.elements.discountAmount.value));
+  const { discountType, discountInputValue, adjustmentAmount } = getDiscountStateFromInputs();
   const paymentStatus = normalizePaymentStatus(form.elements.paymentStatus.value);
   const poStatus = normalizePoStatus(form.elements.poStatus.value);
   const deliveryStatus = normalizeDeliveryStatus(form.elements.deliveryStatus.value);
   const terms = form.elements.terms.value || '';
   const lineCards = Array.from(document.querySelectorAll('.line-item-card'));
-  const lines = lineCards.map(card => {
+  const rawLines = lineCards.map(card => {
     const itemDesc = cleanText(card.querySelector('[name="itemDesc"]')?.value);
     const quantityOrdered = number(card.querySelector('[name="quantityOrdered"]')?.value);
     const itemPrice = number(card.querySelector('[name="itemPrice"]')?.value);
     const itemTaxPercent = number(card.querySelector('[name="itemTaxPercent"]')?.value);
     const lineType = inferLineType(itemDesc, card.querySelector('[name="lineType"]')?.value);
-    const itemTotal = quantityOrdered * itemPrice;
-    const itemTaxAmount = itemTotal * (itemTaxPercent / 100);
     return {
       itemDesc,
       quantityOrdered,
       itemPrice,
       itemTaxPercent,
-      itemTotal,
-      itemTaxAmount,
       lineType
     };
   }).filter(line => line.itemDesc);
 
-  if (!vendorName || !poDate || !lines.length) {
+  if (!vendorName || !poDate || !rawLines.length) {
     alert('Please fill PO date, vendor name, and at least one PO line.');
     return null;
   }
 
-  const grossTotal = lines.reduce((sum, line) => sum + line.itemTotal + line.itemTaxAmount, 0);
-  const poTotal = Math.max(0, grossTotal - discountAmount);
+  const breakdown = calculatePoBreakdown(rawLines, discountType, discountInputValue, adjustmentAmount);
   const originalItems = existingPo?.items || [];
   const usedBaseIds = new Set();
-  const updatedRows = lines.map((line, index) => {
+  const updatedRows = breakdown.lines.map((line, index) => {
     const base = originalItems[index];
     if (base?.id) usedBaseIds.add(base.id);
     return {
@@ -1677,11 +1798,15 @@ function collectPoFormPayload(existingPo = null) {
       itemTaxPercent: line.itemTaxPercent,
       itemTaxAmount: line.itemTaxAmount,
       itemTotal: line.itemTotal,
+      lineGrandTotal: line.lineGrandTotal,
       lineType: line.lineType,
-      total: index === 0 ? poTotal : null,
+      total: index === 0 ? breakdown.grandTotal : null,
       paymentStatus,
       balanceDue: base?.balanceDue ?? null,
-      discountAmount,
+      discountAmount: breakdown.discountValue,
+      discountType: breakdown.discountType,
+      discountInputValue: breakdown.discountInputValue,
+      adjustmentAmount: breakdown.adjustmentAmount,
       manual: base?.manual || !base
     };
   });
@@ -1765,8 +1890,10 @@ function openProductDetailModal(poKey) {
   document.getElementById('detailModalContent').innerHTML = `
     <div class="detail-summary">
       <div class="detail-card"><div class="k">PO Date</div><div class="v">${formatDate(po.poDate)}</div></div>
-      <div class="detail-card"><div class="k">Gross Total</div><div class="v">${money(po.grossTotal)}</div></div>
-      <div class="detail-card"><div class="k">Discount</div><div class="v">${money(po.discountAmount || 0)}</div></div>
+      <div class="detail-card"><div class="k">Item Total</div><div class="v">${money(po.itemSubtotal || 0)}</div></div>
+      <div class="detail-card"><div class="k">Discount</div><div class="v">${money(po.discountAmount || 0)}${po.discountType === 'percent' ? ` (${escapeHtml(String(po.discountInputValue || 0))}%)` : ''}</div></div>
+      <div class="detail-card"><div class="k">Tax Total</div><div class="v">${money(po.taxTotal || 0)}</div></div>
+      <div class="detail-card"><div class="k">Adjustment</div><div class="v">${money(po.adjustmentAmount || 0)}</div></div>
       <div class="detail-card"><div class="k">PO Total</div><div class="v">${money(po.poTotal)}</div></div>
       <div class="detail-card"><div class="k">Payment</div><div class="v"><span class="badge ${badgeClass(po.paymentStatus)}">${escapeHtml(po.paymentStatus)}</span></div></div>
       <div class="detail-card"><div class="k">Delivery</div><div class="v"><span class="badge ${badgeClass(po.deliveryStatus)}">${escapeHtml(po.deliveryStatus)}</span> <span class="small-text">${formatDate(po.deliveryDate)}</span></div></div>
@@ -2139,14 +2266,16 @@ function bindGlobalEvents() {
   });
 
   document.getElementById('poLineItems').addEventListener('input', recalcPoSummary);
-  document.getElementById('poForm').addEventListener('input', event => {
-    if (event.target.matches('[name="discountAmount"], [name="quantityOrdered"], [name="itemPrice"], [name="itemTaxPercent"]')) {
-      recalcPoSummary();
-    }
-  });
   document.getElementById('poLineItems').addEventListener('change', event => {
     if (event.target.matches('[name="lineType"]')) refreshLineIndexes();
+    recalcPoSummary();
   });
+
+  document.getElementById('summaryDiscountType')?.addEventListener('change', recalcPoSummary);
+  document.getElementById('summaryDiscountInput')?.addEventListener('input', recalcPoSummary);
+  document.getElementById('summaryDiscountInput')?.addEventListener('change', recalcPoSummary);
+  document.getElementById('summaryAdjustmentInput')?.addEventListener('input', recalcPoSummary);
+  document.getElementById('summaryAdjustmentInput')?.addEventListener('change', recalcPoSummary);
 
   document.getElementById('poForm').addEventListener('submit', event => {
     event.preventDefault();

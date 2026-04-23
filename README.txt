@@ -64,3 +64,29 @@ Update:
 - PO total now calculates as Item Total + Tax Total - Discount
 - Discount shows in PO detail popup and PO cards
 - Supabase requires running add_po_discount_column.sql once
+
+Fix:
+- Discount field now updates totals live while typing via delegated form input.
+- Added clearer alert if Supabase is missing discount_amount column.
+
+- Moved Discount Amount input from PO header fields to the totals area above the summary chips.
+
+
+Update:
+- Added PO-level Adjustment field in totals area
+- Adjustment supports plus or minus values
+- New PO total formula: Item Total + Tax Total - Discount + Adjustment
+- Supabase requires running add_po_adjustment_column.sql once
+
+
+Algorithm update:
+- Item Total = sum(qty * unit price)
+- Discount now supports amount or percent
+- Tax is calculated after discount
+- PO Total = taxable subtotal + tax total + adjustment
+- Run add_discount_mode_columns.sql once in Supabase
+
+
+Live fix:
+- Removed old duplicate discount field above summary cards
+- Adjustment and discount inputs now recalculate PO Total instantly
