@@ -568,6 +568,77 @@ function dedupeRecordsByKey(records, keyName) {
   return Array.from(map.values());
 }
 
+function isDbImportPayload(payload) {
+  return Boolean(
+    payload &&
+    Array.isArray(payload.purchase_orders) &&
+    Array.isArray(payload.po_lines)
+  );
+}
+
+function convertDbImportPayloadToLocalRows(payload) {
+  const poMap = new Map(
+    (payload.purchase_orders || []).map(po => [cleanText(po.po_number), po])
+  );
+
+  const firstLineIndexByPo = new Map();
+  const rows = dedupeRecordsByKey((payload.po_lines || []).map((line, index) => {
+    const poNumber = cleanText(line.po_number);
+    const po = poMap.get(poNumber) || {};
+    const rowId = cleanText(line.line_id) || uid('import');
+    const rowIndex = (firstLineIndexByPo.get(poNumber) || 0) + 1;
+    firstLineIndexByPo.set(poNumber, rowIndex);
+
+    return {
+      id: rowId,
+      poDate: cleanText(po.po_date || line.po_date),
+      deliveryDate: cleanText(po.delivery_date || line.delivery_date),
+      poNumber,
+      vendorName: cleanText(po.vendor_name || line.vendor_name),
+      source: cleanText(line.source || po.source),
+      gstin: cleanText(line.gstin ?? po.gstin),
+      terms: String(line.terms ?? po.terms ?? ''),
+      itemDesc: cleanText(line.item_desc),
+      quantityOrdered: number(line.quantity_ordered),
+      itemPrice: number(line.item_price),
+      itemTaxPercent: number(line.item_tax_percent),
+      itemTaxAmount: number(line.item_tax_amount),
+      itemTotal: number(line.item_total),
+      lineGrandTotal: number(line.line_grand_total),
+      lineType: cleanText(line.line_type || inferLineType(line.item_desc, line.line_type)).toLowerCase() === 'charge' ? 'charge' : 'product',
+      isCharge: Boolean(line.is_charge) || cleanText(line.line_type).toLowerCase() === 'charge',
+      paymentStatus: normalizePaymentStatus(po.payment_status || line.payment_status),
+      poStatus: normalizePoStatus(po.po_status || line.po_status),
+      deliveryStatus: normalizeDeliveryStatus(po.delivery_status || line.delivery_status),
+      balanceDue: line.balance_due ?? null,
+      discountAmount: number(po.discount_amount),
+      discountType: cleanText(po.discount_type || 'amount').toLowerCase() === 'percent' ? 'percent' : 'amount',
+      discountInputValue: number(po.discount_input_value),
+      adjustmentAmount: number(po.adjustment_amount),
+      total: rowIndex === 1 ? number(po.po_total) : null,
+      manual: true
+    };
+  }), 'id');
+
+  const vendorContacts = {};
+  (payload.purchase_orders || []).forEach(po => {
+    const vendorName = cleanText(po.vendor_name);
+    if (!vendorName) return;
+    vendorContacts[vendorName] = {
+      ...(vendorContacts[vendorName] || {}),
+      vendorName,
+      source: cleanText(po.source),
+      gstin: cleanText(po.gstin)
+    };
+  });
+
+  return {
+    manualRows: rows,
+    rowOverrides: {},
+    vendorContacts
+  };
+}
+
 function normalizeKey(value) {
   return cleanText(value).toUpperCase();
 }
@@ -746,8 +817,15 @@ function materializeRow(row) {
 
 function allRows() {
   const rowMap = new Map();
+  const manualPoNumbers = new Set(
+    (state.manualRows || [])
+      .filter(row => row && !row.__deleted)
+      .map(row => cleanText(row.poNumber))
+      .filter(Boolean)
+  );
 
   baseRows.forEach(base => {
+    if (manualPoNumbers.has(cleanText(base.poNumber))) return;
     const override = state.rowOverrides?.[base.id];
     if (override?.__deleted) return;
     const merged = materializeRow(override ? { ...base, ...override } : base);
@@ -2070,14 +2148,28 @@ function importLocalState(event) {
   reader.onload = () => {
     try {
       const payload = JSON.parse(reader.result);
-      state.manualRows = Array.isArray(payload.manualRows) ? payload.manualRows : state.manualRows;
-      state.rowOverrides = payload.rowOverrides && typeof payload.rowOverrides === 'object' ? payload.rowOverrides : state.rowOverrides;
-      state.vendorContacts = mergeVendorSeeds(payload.vendorContacts && typeof payload.vendorContacts === 'object' ? payload.vendorContacts : state.vendorContacts);
-      state.productVendorMetrics = payload.productVendorMetrics && typeof payload.productVendorMetrics === 'object' ? payload.productVendorMetrics : state.productVendorMetrics;
-      state.deletedVendors = Array.isArray(payload.deletedVendors) ? payload.deletedVendors : state.deletedVendors;
-      saveState();
-      renderAll();
-      alert('Local data imported.');
+
+      if (isDbImportPayload(payload)) {
+        const imported = convertDbImportPayloadToLocalRows(payload);
+        state.manualRows = Array.isArray(imported.manualRows) ? imported.manualRows : [];
+        state.rowOverrides = {};
+        state.vendorContacts = mergeVendorSeeds({
+          ...(state.vendorContacts || {}),
+          ...(imported.vendorContacts || {})
+        });
+        saveState();
+        renderAll();
+        alert(`DB JSON imported: ${state.manualRows.length} lines across ${payload.purchase_orders.length} purchase orders.`);
+      } else {
+        state.manualRows = Array.isArray(payload.manualRows) ? payload.manualRows : state.manualRows;
+        state.rowOverrides = payload.rowOverrides && typeof payload.rowOverrides === 'object' ? payload.rowOverrides : state.rowOverrides;
+        state.vendorContacts = mergeVendorSeeds(payload.vendorContacts && typeof payload.vendorContacts === 'object' ? payload.vendorContacts : state.vendorContacts);
+        state.productVendorMetrics = payload.productVendorMetrics && typeof payload.productVendorMetrics === 'object' ? payload.productVendorMetrics : state.productVendorMetrics;
+        state.deletedVendors = Array.isArray(payload.deletedVendors) ? payload.deletedVendors : state.deletedVendors;
+        saveState();
+        renderAll();
+        alert('Local data imported.');
+      }
     } catch {
       alert('Unable to import this JSON file.');
     } finally {
