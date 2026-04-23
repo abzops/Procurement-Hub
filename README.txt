@@ -57,3 +57,10 @@ Supabase live mode:
 - config.js is prefilled with the project URL and publishable key
 - app.js now loads from Supabase on startup and syncs changes back to Supabase
 - For GitHub Pages, upload all files in this folder to repo root and commit
+
+
+Update:
+- Added PO-level Discount Amount field in Add/Edit PO modal
+- PO total now calculates as Item Total + Tax Total - Discount
+- Discount shows in PO detail popup and PO cards
+- Supabase requires running add_po_discount_column.sql once

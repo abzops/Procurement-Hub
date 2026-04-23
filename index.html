@@ -304,9 +304,17 @@
           <div id="poLineItems" class="line-items"></div>
         </div>
 
+        <div class="summary-toolbar">
+          <label class="summary-discount-field">
+            <span>Discount Amount</span>
+            <input class="control-input discount-inline-input" type="number" min="0" step="0.01" name="discountAmount" placeholder="0.00" />
+          </label>
+        </div>
+
         <div class="summary-strip" id="poSummaryStrip">
           <div class="summary-chip"><span>Item Total</span><strong id="summaryItemTotal">₹0.00</strong></div>
           <div class="summary-chip"><span>Tax Total</span><strong id="summaryTaxTotal">₹0.00</strong></div>
+          <div class="summary-chip"><span>Discount</span><strong id="summaryDiscountTotal">₹0.00</strong></div>
           <div class="summary-chip summary-accent"><span>PO Total</span><strong id="summaryPoTotal">₹0.00</strong></div>
         </div>
 
