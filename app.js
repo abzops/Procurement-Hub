@@ -352,7 +352,7 @@ async function syncStateToSupabase() {
   remoteSyncInFlight = true;
   try {
     const derived = buildDerived();
-    const allRowsData = allRows();
+    const allRowsData = dedupeRowsById(allRows());
 
     const vendorNames = new Set([
       ...Object.keys(state.vendorContacts || {}).map(cleanText),
@@ -381,7 +381,7 @@ async function syncStateToSupabase() {
         };
       });
 
-    const poPayload = derived.pos.map(po => ({
+    const poPayload = dedupeRecordsByKey(derived.pos.map(po => ({
       po_number: po.poNumber,
       po_date: safeDate(po.poDate),
       vendor_name: po.vendorName,
@@ -403,9 +403,9 @@ async function syncStateToSupabase() {
       total_qty: toNumeric(po.totalQty),
       total_charge_value: toNumeric(po.totalChargeValue),
       reference_no: ''
-    }));
+    })), 'po_number');
 
-    const linePayload = allRowsData.map(line => ({
+    const linePayload = dedupeRecordsByKey(allRowsData.map(line => ({
       line_id: line.id,
       po_number: line.poNumber,
       vendor_name: line.vendorName,
@@ -428,9 +428,9 @@ async function syncStateToSupabase() {
       source: line.source || '',
       gstin: line.gstin || '',
       manual: Boolean(line.manual)
-    }));
+    })), 'line_id');
 
-    const metricsPayload = Object.entries(state.productVendorMetrics || {}).map(([metricKey, metric]) => ({
+    const metricsPayload = dedupeRecordsByKey(Object.entries(state.productVendorMetrics || {}).map(([metricKey, metric]) => ({
       metric_key: metricKey,
       product_name: cleanText(metric.productName || splitMetricStorageKey(metricKey).productName),
       vendor_name: cleanText(metric.vendorName || splitMetricStorageKey(metricKey).vendorName),
@@ -441,7 +441,7 @@ async function syncStateToSupabase() {
       notes: metric.notes || '',
       source: cleanText(metric.source || ''),
       gstin: cleanText(metric.gstin || '')
-    })).filter(x => x.product_name && x.vendor_name);
+    })).filter(x => x.product_name && x.vendor_name), 'metric_key');
 
     // Upsert vendors first for FK safety
     if (vendorsPayload.length) {
@@ -496,7 +496,12 @@ async function syncStateToSupabase() {
     }
   } catch (error) {
     console.error('Supabase sync failed', error);
-    alert(`Supabase sync failed: ${error.message || error}`);
+    const message = String(error?.message || error || '');
+    if (message.includes('cannot affect row a second time')) {
+      alert('Supabase sync failed because duplicate PO line IDs were detected in this save. Refresh once and save again.');
+    } else {
+      alert(`Supabase sync failed: ${message}`);
+    }
   } finally {
     remoteSyncInFlight = false;
   }
@@ -540,6 +545,27 @@ function mergeVendorSeeds(existing) {
 
 function cleanText(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function dedupeRowsById(rows) {
+  const map = new Map();
+  (rows || []).forEach(row => {
+    if (!row || row.__deleted) return;
+    const key = cleanText(row.id);
+    if (!key) return;
+    map.set(key, row);
+  });
+  return Array.from(map.values());
+}
+
+function dedupeRecordsByKey(records, keyName) {
+  const map = new Map();
+  (records || []).forEach(record => {
+    const key = cleanText(record?.[keyName]);
+    if (!key) return;
+    map.set(key, record);
+  });
+  return Array.from(map.values());
 }
 
 function normalizeKey(value) {
@@ -719,20 +745,22 @@ function materializeRow(row) {
 }
 
 function allRows() {
-  const rows = [];
+  const rowMap = new Map();
 
   baseRows.forEach(base => {
     const override = state.rowOverrides?.[base.id];
     if (override?.__deleted) return;
-    rows.push(materializeRow(override ? { ...base, ...override } : base));
+    const merged = materializeRow(override ? { ...base, ...override } : base);
+    rowMap.set(cleanText(merged.id), merged);
   });
 
   (state.manualRows || []).forEach(row => {
     if (row?.__deleted) return;
-    rows.push(materializeRow(row));
+    const merged = materializeRow(row);
+    rowMap.set(cleanText(merged.id), merged);
   });
 
-  return rows;
+  return Array.from(rowMap.values());
 }
 
 function uniqueMeaningful(values) {
