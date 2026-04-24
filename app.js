@@ -1930,6 +1930,7 @@ function collectPoFormPayload(existingPo = null) {
   const deliveryDate = form.elements.deliveryDate.value;
   const { discountType, discountInputValue, adjustmentAmount } = getDiscountStateFromInputs();
   const amountPaidInput = number(document.getElementById('summaryAmountPaidInput')?.value);
+  const paymentStatus = normalizePaymentStatus(form.elements.paymentStatus.value);
   const poStatus = normalizePoStatus(form.elements.poStatus.value);
   const deliveryStatus = normalizeDeliveryStatus(form.elements.deliveryStatus.value);
   const terms = form.elements.terms.value || '';
@@ -1956,7 +1957,6 @@ function collectPoFormPayload(existingPo = null) {
 
   const breakdown = calculatePoBreakdown(rawLines, discountType, discountInputValue, adjustmentAmount);
   const paymentState = derivePaymentState(breakdown.grandTotal, amountPaidInput);
-  const paymentStatus = paymentState.paymentStatus;
   const originalItems = existingPo?.items || [];
   const usedBaseIds = new Set();
   const updatedRows = breakdown.lines.map((line, index) => {
