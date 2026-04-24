@@ -159,12 +159,13 @@ function roundMoney(value) {
 }
 
 function derivePaymentState(poTotal, amountPaidInput = 0, explicitBalanceDue = null) {
-  const total = roundMoney(poTotal);
+  const total = Math.max(0, roundMoney(poTotal));
   const paidInput = Math.max(0, roundMoney(amountPaidInput));
-  const hasExplicitBalance = explicitBalanceDue !== null && explicitBalanceDue !== undefined && explicitBalanceDue !== '';
-  const balanceDue = hasExplicitBalance
-    ? Math.max(0, roundMoney(explicitBalanceDue))
-    : Math.max(0, roundMoney(total - Math.min(total, paidInput)));
+  const hasExplicitBalance = explicitBalanceDue !== null && explicitBalanceDue !== undefined && explicitBalanceDue !== '' && Number.isFinite(Number(explicitBalanceDue));
+  const rawBalance = hasExplicitBalance
+    ? roundMoney(explicitBalanceDue)
+    : roundMoney(total - Math.min(total, paidInput));
+  const balanceDue = Math.max(0, rawBalance);
   const amountPaid = Math.max(0, roundMoney(total - balanceDue));
   let paymentStatus = 'Pending';
   if (total <= 0 || amountPaid >= total) paymentStatus = 'Paid';
@@ -976,15 +977,17 @@ function groupedPOs(rows) {
     const providedDiscountInputs = [...new Set(items.map(item => Math.max(0, number(item.discountInputValue))).filter(value => value > 0))];
     const providedAdjustments = [...new Set(items.map(item => number(item.adjustmentAmount)).filter(value => value !== 0))];
     const providedTotals = [...new Set(items.map(item => number(item.total)).filter(value => value > 0))];
-    const providedAmountPaid = [...new Set(items.map(item => Math.max(0, number(item.amountPaid))).filter(value => value > 0))];
-    const providedBalanceDue = [...new Set(items.map(item => number(item.balanceDue)).filter(value => value >= 0))];
+    const providedAmountPaid = [...new Set(items.map(item => Math.max(0, number(item.amountPaid))).filter(value => value >= 0))];
+    const providedBalanceDue = [...new Set(items.map(item => item.balanceDue).filter(value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))))];
     const discountAmount = providedDiscounts.length ? providedDiscounts[0] : 0;
     const discountType = providedDiscountTypes.length ? providedDiscountTypes[0] : 'amount';
     const discountInputValue = providedDiscountInputs.length ? providedDiscountInputs[0] : discountAmount;
     const adjustmentAmount = providedAdjustments.length ? providedAdjustments[0] : 0;
     const taxableSubtotal = roundMoney(itemSubtotal - discountAmount);
     const poTotal = providedTotals.length === 1 ? providedTotals[0] : Math.max(0, taxableSubtotal + taxTotal + adjustmentAmount);
-    const paymentDerived = derivePaymentState(poTotal, providedAmountPaid.length ? providedAmountPaid[0] : 0, providedBalanceDue.length ? providedBalanceDue[0] : null);
+    const fallbackAmountPaid = providedAmountPaid.length ? providedAmountPaid[0] : 0;
+    const fallbackBalanceDue = providedBalanceDue.length ? providedBalanceDue[0] : null;
+    const paymentDerived = derivePaymentState(poTotal, fallbackAmountPaid, fallbackBalanceDue);
     const amountPaid = paymentDerived.amountPaid;
     const balanceDue = paymentDerived.balanceDue;
     const totalQty = productItems.reduce((sum, item) => sum + number(item.quantityOrdered), 0);
@@ -1328,7 +1331,10 @@ function setSelectOptions(id, options, selectedValue, placeholderLabel = 'All') 
 
 function renderKpis({ pos, vendors, products, rows }) {
   const totalPOValue = pos.reduce((sum, po) => sum + number(po.poTotal), 0);
-  const openPaymentValue = pos.reduce((sum, po) => sum + Math.max(0, number(po.balanceDue)), 0);
+  const openPaymentValue = pos.reduce((sum, po) => {
+    const derived = derivePaymentState(number(po.poTotal), number(po.amountPaid), po.balanceDue);
+    return sum + Math.max(0, number(derived.balanceDue));
+  }, 0);
   const deliveredCount = pos.filter(po => po.deliveryStatus === 'Delivered').length;
   const partialPaymentCount = pos.filter(po => po.paymentStatus === 'Partially Paid').length;
   const cards = [
@@ -1882,7 +1888,8 @@ function recalcPoSummary() {
   const { discountType, discountInputValue, adjustmentAmount } = getDiscountStateFromInputs();
   const breakdown = calculatePoBreakdown(lines, discountType, discountInputValue, adjustmentAmount);
   const amountPaidInputEl = document.getElementById('summaryAmountPaidInput');
-  const paymentState = derivePaymentState(breakdown.grandTotal, number(amountPaidInputEl?.value));
+  const typedAmountPaid = number(amountPaidInputEl?.value);
+  const paymentState = derivePaymentState(breakdown.grandTotal, typedAmountPaid);
 
   document.querySelectorAll('.line-item-card').forEach((card, index) => {
     const totalMount = card.querySelector('[data-line-total]');
