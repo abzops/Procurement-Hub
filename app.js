@@ -140,8 +140,24 @@ const state = {
 const snsConfig = window.SNS_CONFIG || {};
 const useSupabase = Boolean(snsConfig.useSupabase && snsConfig.supabaseUrl && snsConfig.supabaseAnonKey && window.supabase?.createClient);
 const supabaseClient = useSupabase ? window.supabase.createClient(snsConfig.supabaseUrl, snsConfig.supabaseAnonKey) : null;
+const queueConfig = {
+  enabled: Boolean(snsConfig.useQueueProcessor && useSupabase),
+  table: cleanConfigText(snsConfig.queueTable) || 'incoming_po_queue',
+  payloadColumn: cleanConfigText(snsConfig.queuePayloadColumn) || 'raw_payload',
+  statusColumn: cleanConfigText(snsConfig.queueStatusColumn) || 'status',
+  errorColumn: cleanConfigText(snsConfig.queueErrorColumn) || 'error_message',
+  processedAtColumn: cleanConfigText(snsConfig.queueProcessedAtColumn) || 'processed_at',
+  poNumberColumn: cleanConfigText(snsConfig.queuePoNumberColumn) || 'po_number',
+  sourceColumn: cleanConfigText(snsConfig.queueSourceColumn) || 'source',
+  batchSize: Number.isFinite(Number(snsConfig.queueBatchSize)) ? Math.max(1, Number(snsConfig.queueBatchSize)) : 20
+};
 let remoteSyncTimer = null;
 let remoteSyncInFlight = false;
+let queueProcessingInFlight = false;
+
+function cleanConfigText(value) {
+  return String(value ?? '').trim();
+}
 
 function safeDate(value) {
   const text = cleanText(value);
@@ -595,6 +611,345 @@ function isDbImportPayload(payload) {
   );
 }
 
+function isSinglePoPackagePayload(payload) {
+  return Boolean(payload && payload.purchase_order && Array.isArray(payload.po_lines));
+}
+
+function isRawZohoPoPayload(payload) {
+  return Boolean(payload && cleanText(payload.purchaseorder_number || payload.purchaseorder_id || payload.po_number) && Array.isArray(payload.line_items));
+}
+
+function sumLineItemTaxes(lineItem) {
+  const taxes = Array.isArray(lineItem?.line_item_taxes) ? lineItem.line_item_taxes : [];
+  if (!taxes.length) return toNumeric(lineItem?.item_tax_amount) || 0;
+  return roundMoney(taxes.reduce((sum, tax) => {
+    const amount = Number(tax?.tax_amount ?? tax?.amount ?? tax?.tax_total ?? 0);
+    return sum + (Number.isFinite(amount) ? amount : 0);
+  }, 0));
+}
+
+function convertSinglePoPackageToDbPayload(payload) {
+  if (!isSinglePoPackagePayload(payload)) return null;
+  const purchaseOrder = payload.purchase_order || {};
+  const poLines = Array.isArray(payload.po_lines) ? payload.po_lines : [];
+  return {
+    purchase_orders: [purchaseOrder],
+    po_lines: poLines
+  };
+}
+
+function convertZohoPoPayloadToDbPayload(payload) {
+  if (!isRawZohoPoPayload(payload)) return null;
+
+  const poNumber = cleanText(payload.purchaseorder_number || payload.po_number);
+  const poDate = cleanText(payload.date || payload.po_date);
+  const deliveryDate = cleanText(payload.delivery_date || payload.expected_delivery_date);
+  const vendorName = cleanText(payload.vendor_name);
+  const source = cleanText(payload.source_of_supply || payload.source || payload.destination_of_supply);
+  const gstin = cleanText(payload.gst_no || payload.gstin);
+  const terms = String(payload.terms ?? payload.notes ?? '');
+  const paymentStatus = normalizePaymentStatus(payload.payment_status || payload.payment_terms_label || 'Pending');
+  const poStatus = normalizePoStatus(payload.status || payload.po_status || 'Issued');
+  const deliveryStatus = normalizeDeliveryStatus(payload.delivery_status || payload.received_status || payload.received_status_formatted || 'Unknown');
+  const discountAmount = roundMoney(payload.discount_total ?? payload.discount_amount ?? 0);
+  const discountInputValue = roundMoney(payload.discount_total ?? payload.discount_amount ?? 0);
+  const adjustmentAmount = roundMoney(payload.adjustment ?? 0);
+  const totalAmount = roundMoney(payload.total ?? payload.po_total ?? 0);
+  const referenceNo = cleanText(payload.reference_number || payload.reference_no || payload.purchaseorder_id);
+  const lineItems = Array.isArray(payload.line_items) ? payload.line_items : [];
+
+  const poLines = lineItems.map((item, index) => {
+    const itemDesc = cleanText(item?.name || item?.item_desc || item?.description);
+    const quantityOrdered = roundMoney(item?.quantity ?? item?.qty ?? 0);
+    const itemPrice = roundMoney(item?.rate ?? item?.item_price ?? 0);
+    const itemTotal = roundMoney(item?.item_total ?? (quantityOrdered * itemPrice));
+    const itemTaxPercent = roundMoney(item?.tax_percentage ?? item?.item_tax_percent ?? 0);
+    const itemTaxAmount = sumLineItemTaxes(item);
+    const lineType = inferLineType(itemDesc, item?.line_type);
+    const isCharge = lineType === 'charge';
+    const itemOrder = cleanText(item?.item_order || item?.line_item_id || String(index + 1));
+    return {
+      line_id: `${poNumber}__${itemOrder}`,
+      po_number: poNumber,
+      vendor_name: vendorName,
+      po_date: poDate,
+      delivery_date: deliveryDate || null,
+      payment_status: paymentStatus,
+      po_status: poStatus,
+      delivery_status: deliveryStatus,
+      line_type: lineType,
+      is_charge: isCharge,
+      item_desc: itemDesc,
+      quantity_ordered: quantityOrdered,
+      item_price: itemPrice,
+      item_tax_percent: itemTaxPercent,
+      item_tax_amount: itemTaxAmount,
+      item_total: itemTotal,
+      line_grand_total: roundMoney(itemTotal + itemTaxAmount),
+      balance_due: null,
+      terms,
+      source,
+      gstin,
+      manual: false
+    };
+  });
+
+  const chargeLines = poLines.filter(line => line.is_charge);
+  const productLines = poLines.filter(line => !line.is_charge);
+  const totalQty = roundMoney(productLines.reduce((sum, line) => sum + number(line.quantity_ordered), 0));
+  const totalChargeValue = roundMoney(chargeLines.reduce((sum, line) => sum + number(line.line_grand_total), 0));
+  const itemCount = poLines.length;
+  const chargeCount = chargeLines.length;
+  const productCount = productLines.length;
+
+  return {
+    purchase_orders: [{
+      po_number: poNumber,
+      po_date: poDate || null,
+      vendor_name: vendorName,
+      source,
+      gstin,
+      delivery_date: deliveryDate || null,
+      payment_status: paymentStatus,
+      po_status: poStatus,
+      delivery_status: deliveryStatus,
+      terms,
+      po_total: totalAmount,
+      item_count: itemCount,
+      product_count: productCount,
+      charge_count: chargeCount,
+      total_qty: totalQty,
+      total_charge_value: totalChargeValue,
+      reference_no: referenceNo,
+      discount_amount: discountAmount,
+      discount_type: 'amount',
+      discount_input_value: discountInputValue,
+      adjustment_amount: adjustmentAmount,
+      amount_paid: paymentStatus === 'Paid' ? totalAmount : 0,
+      balance_due: paymentStatus === 'Paid' ? 0 : totalAmount
+    }],
+    po_lines: poLines
+  };
+}
+
+function normalizeIncomingDbPayload(payload) {
+  if (isDbImportPayload(payload)) return payload;
+  const singlePackage = convertSinglePoPackageToDbPayload(payload);
+  if (singlePackage) return singlePackage;
+  const zohoPackage = convertZohoPoPayloadToDbPayload(payload);
+  if (zohoPackage) return zohoPackage;
+  return null;
+}
+
+function buildVendorPayloadFromDbPayload(payload) {
+  const vendorMap = new Map();
+  (payload.purchase_orders || []).forEach(po => {
+    const vendorName = cleanText(po.vendor_name);
+    if (!vendorName) return;
+    vendorMap.set(vendorName, {
+      vendor_name: vendorName,
+      source: cleanText(po.source),
+      gstin: cleanText(po.gstin),
+      contact_person: '',
+      phone: '',
+      email: '',
+      website: '',
+      city: '',
+      default_lead_time_days: '',
+      rating: '',
+      notes: '',
+      is_deleted: false
+    });
+  });
+  (payload.po_lines || []).forEach(line => {
+    const vendorName = cleanText(line.vendor_name);
+    if (!vendorName) return;
+    const existing = vendorMap.get(vendorName) || {
+      vendor_name: vendorName,
+      source: '',
+      gstin: '',
+      contact_person: '',
+      phone: '',
+      email: '',
+      website: '',
+      city: '',
+      default_lead_time_days: '',
+      rating: '',
+      notes: '',
+      is_deleted: false
+    };
+    if (!existing.source) existing.source = cleanText(line.source);
+    if (!existing.gstin) existing.gstin = cleanText(line.gstin);
+    vendorMap.set(vendorName, existing);
+  });
+  return Array.from(vendorMap.values());
+}
+
+async function upsertDbPayloadToSupabase(payload) {
+  if (!useSupabase) throw new Error('Supabase is not enabled.');
+  const normalized = normalizeIncomingDbPayload(payload);
+  if (!normalized) throw new Error('Unsupported payload shape.');
+
+  const vendorsPayload = buildVendorPayloadFromDbPayload(normalized);
+  const poPayload = dedupeRecordsByKey((normalized.purchase_orders || []).map(po => ({
+    po_number: cleanText(po.po_number),
+    po_date: safeDate(po.po_date),
+    vendor_name: cleanText(po.vendor_name),
+    source: cleanText(po.source),
+    gstin: cleanText(po.gstin),
+    delivery_date: safeDate(po.delivery_date),
+    payment_status: normalizePaymentStatus(po.payment_status || 'Pending'),
+    po_status: normalizePoStatus(po.po_status || 'Issued'),
+    delivery_status: normalizeDeliveryStatus(po.delivery_status || 'Unknown'),
+    terms: String(po.terms ?? ''),
+    po_total: toNumeric(po.po_total),
+    discount_amount: toNumeric(po.discount_amount),
+    discount_type: cleanText(po.discount_type || 'amount').toLowerCase() === 'percent' ? 'percent' : 'amount',
+    discount_input_value: toNumeric(po.discount_input_value ?? po.discount_amount ?? 0),
+    adjustment_amount: toNumeric(po.adjustment_amount),
+    amount_paid: toNumeric(po.amount_paid),
+    balance_due: toNumeric(po.balance_due),
+    item_count: Number(po.item_count || 0),
+    product_count: Number(po.product_count || 0),
+    charge_count: Number(po.charge_count || 0),
+    total_qty: toNumeric(po.total_qty),
+    total_charge_value: toNumeric(po.total_charge_value),
+    reference_no: cleanText(po.reference_no)
+  })), 'po_number');
+
+  const linePayload = dedupeRecordsByKey((normalized.po_lines || []).map(line => ({
+    line_id: cleanText(line.line_id),
+    po_number: cleanText(line.po_number),
+    vendor_name: cleanText(line.vendor_name),
+    po_date: safeDate(line.po_date),
+    delivery_date: safeDate(line.delivery_date),
+    payment_status: normalizePaymentStatus(line.payment_status || 'Pending'),
+    po_status: normalizePoStatus(line.po_status || 'Issued'),
+    delivery_status: normalizeDeliveryStatus(line.delivery_status || 'Unknown'),
+    line_type: inferLineType(line.item_desc, line.line_type),
+    is_charge: Boolean(line.is_charge) || inferLineType(line.item_desc, line.line_type) === 'charge',
+    item_desc: cleanText(line.item_desc),
+    quantity_ordered: toNumeric(line.quantity_ordered),
+    item_price: toNumeric(line.item_price),
+    item_tax_percent: toNumeric(line.item_tax_percent),
+    item_tax_amount: toNumeric(line.item_tax_amount),
+    item_total: toNumeric(line.item_total),
+    line_grand_total: toNumeric(line.line_grand_total),
+    balance_due: toNumeric(line.balance_due),
+    terms: String(line.terms ?? ''),
+    source: cleanText(line.source),
+    gstin: cleanText(line.gstin),
+    manual: Boolean(line.manual)
+  })), 'line_id');
+
+  if (vendorsPayload.length) {
+    const { error } = await supabaseClient.from('vendors').upsert(vendorsPayload, { onConflict: 'vendor_name' });
+    if (error) throw error;
+  }
+  if (poPayload.length) {
+    const { error } = await supabaseClient.from('purchase_orders').upsert(poPayload, { onConflict: 'po_number' });
+    if (error) throw error;
+  }
+  if (linePayload.length) {
+    const { error } = await supabaseClient.from('po_lines').upsert(linePayload, { onConflict: 'line_id' });
+    if (error) throw error;
+  }
+  return { vendors: vendorsPayload.length, purchaseOrders: poPayload.length, poLines: linePayload.length };
+}
+
+async function refreshStateFromSupabase() {
+  if (!useSupabase) return;
+  await loadRemoteStateFromSupabase();
+  renderAll();
+}
+
+function readQueueRowPayload(row) {
+  if (!row || typeof row !== 'object') return null;
+  const candidates = [
+    row[queueConfig.payloadColumn],
+    row.raw_payload,
+    row.payload,
+    row.data,
+    row.body
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (typeof candidate === 'string') {
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        continue;
+      }
+    }
+    if (typeof candidate === 'object') return candidate;
+  }
+  return null;
+}
+
+async function markQueueRow(rowId, patch) {
+  if (!queueConfig.enabled || !rowId) return;
+  const updateData = {};
+  if (queueConfig.statusColumn && patch.status !== undefined) updateData[queueConfig.statusColumn] = patch.status;
+  if (queueConfig.errorColumn && patch.error_message !== undefined) updateData[queueConfig.errorColumn] = patch.error_message;
+  if (queueConfig.processedAtColumn && patch.processed_at !== undefined) updateData[queueConfig.processedAtColumn] = patch.processed_at;
+  if (!Object.keys(updateData).length) return;
+  const { error } = await supabaseClient.from(queueConfig.table).update(updateData).eq('id', rowId);
+  if (error) console.warn('Queue row update skipped', error);
+}
+
+async function processIncomingQueue() {
+  if (!queueConfig.enabled) {
+    alert('Queue processor is disabled. Enable it in config.js first.');
+    return;
+  }
+  if (queueProcessingInFlight) return;
+  queueProcessingInFlight = true;
+  const processBtn = document.getElementById('processQueueBtn');
+  if (processBtn) processBtn.disabled = true;
+  try {
+    const { data, error } = await supabaseClient.from(queueConfig.table).select('*').order('created_at', { ascending: true }).limit(queueConfig.batchSize);
+    if (error) throw error;
+
+    const pendingRows = (data || []).filter(row => {
+      const status = normalizeKey(row?.[queueConfig.statusColumn]);
+      return !status || !['PROCESSED', 'DONE', 'COMPLETED', 'SUCCESS'].includes(status);
+    });
+
+    if (!pendingRows.length) {
+      alert('No pending queue rows found.');
+      return;
+    }
+
+    let processed = 0;
+    let failed = 0;
+    for (const row of pendingRows) {
+      try {
+        const payload = readQueueRowPayload(row);
+        const normalized = normalizeIncomingDbPayload(payload);
+        if (!normalized) throw new Error('Unsupported raw payload shape in queue row.');
+        await upsertDbPayloadToSupabase(normalized);
+        await markQueueRow(row.id, { status: 'processed', error_message: null, processed_at: new Date().toISOString() });
+        processed += 1;
+      } catch (queueError) {
+        failed += 1;
+        await markQueueRow(row.id, { status: 'failed', error_message: String(queueError?.message || queueError), processed_at: null });
+      }
+    }
+
+    await refreshStateFromSupabase();
+    const message = failed
+      ? `Queue processed. Success: ${processed}. Failed: ${failed}.`
+      : `Queue processed successfully. ${processed} row(s) synced.`;
+    alert(message);
+  } catch (error) {
+    console.error('Queue processing failed', error);
+    alert(`Queue processing failed: ${error.message || error}`);
+  } finally {
+    queueProcessingInFlight = false;
+    if (processBtn) processBtn.disabled = false;
+  }
+}
+
 function buildProductVendorMetricsFromRows(rows) {
   const metrics = {};
   (rows || []).forEach(row => {
@@ -793,6 +1148,7 @@ function normalizePaymentStatus(value) {
 function normalizePoStatus(value) {
   const raw = normalizeKey(value);
   if (!raw) return 'Unknown';
+  if (raw.includes('DRAFT')) return 'Draft';
   if (raw.includes('BILL')) return 'Billed';
   if (raw.includes('ISSU')) return 'Issued';
   if (raw.includes('CLOSE')) return 'Closed';
@@ -2230,9 +2586,10 @@ function importLocalState(event) {
   reader.onload = () => {
     try {
       const payload = JSON.parse(reader.result);
+      const normalizedPayload = normalizeIncomingDbPayload(payload);
 
-      if (isDbImportPayload(payload)) {
-        const imported = convertDbImportPayloadToLocalRows(payload);
+      if (normalizedPayload) {
+        const imported = convertDbImportPayloadToLocalRows(normalizedPayload);
         state.manualRows = Array.isArray(imported.manualRows) ? imported.manualRows : [];
         state.rowOverrides = {};
         state.vendorContacts = mergeVendorSeeds({
@@ -2251,14 +2608,14 @@ function importLocalState(event) {
         if (useSupabase) {
           syncStateToSupabase()
             .then(() => {
-              alert(`DB JSON imported and synced: ${state.manualRows.length} lines across ${payload.purchase_orders.length} purchase orders.`);
+              alert(`DB JSON imported and synced: ${state.manualRows.length} lines across ${normalizedPayload.purchase_orders.length} purchase orders.`);
             })
             .catch(err => {
               console.error('Import sync failed', err);
               alert(`DB JSON imported locally, but Supabase sync failed: ${err.message || err}`);
             });
         } else {
-          alert(`DB JSON imported: ${state.manualRows.length} lines across ${payload.purchase_orders.length} purchase orders.`);
+          alert(`DB JSON imported: ${state.manualRows.length} lines across ${normalizedPayload.purchase_orders.length} purchase orders.`);
         }
       } else {
         state.manualRows = Array.isArray(payload.manualRows) ? payload.manualRows : state.manualRows;
@@ -2470,6 +2827,7 @@ function bindGlobalEvents() {
   document.getElementById('exportStateBtn').addEventListener('click', exportLocalState);
   document.getElementById('exportFullDataBtn').addEventListener('click', exportFullData);
   document.getElementById('importStateInput').addEventListener('change', importLocalState);
+  document.getElementById('processQueueBtn')?.addEventListener('click', processIncomingQueue);
 
   document.getElementById('poModalBackdrop').addEventListener('click', event => {
     if (event.target.id === 'poModalBackdrop') closePoModal();

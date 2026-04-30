@@ -90,3 +90,18 @@ Algorithm update:
 Live fix:
 - Removed old duplicate discount field above summary cards
 - Adjustment and discount inputs now recalculate PO Total instantly
+
+
+Queue processor:
+- Added Process Queue button in the header for bulk Zoho payload processing.
+- App can now normalize and ingest three payload shapes:
+  1. strict DB JSON with purchase_orders + po_lines
+  2. single package JSON with purchase_order + po_lines
+  3. raw Zoho Books PO payload with purchaseorder_number + line_items
+- To enable queue processing, set useQueueProcessor = true in config.js and point queueTable to your raw queue table.
+- Expected queue columns can be configured in config.js. Defaults:
+  - raw_payload
+  - status
+  - error_message
+  - processed_at
+- Process Queue upserts vendors, purchase_orders, and po_lines without deleting existing DB data.
