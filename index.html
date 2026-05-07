@@ -56,6 +56,16 @@
     <main>
       <section class="tab-panel active" id="overview">
         <div class="overview-grid">
+          <article class="panel alert-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Lead Time Notifications</h2>
+                <p class="section-copy">Purchase orders that crossed expected delivery / lead time and are not delivered.</p>
+              </div>
+            </div>
+            <div id="leadTimeAlerts" class="stack-list"></div>
+          </article>
+
           <article class="panel">
             <div class="panel-header">
               <div>
@@ -259,6 +269,10 @@
             <span>Delivery Date</span>
             <input class="control-input" type="date" name="deliveryDate" />
           </label>
+          <label class="field hidden" id="eddField">
+            <span class="field-label-inline">EDD <span class="info-icon" title="Revised Estimated Delivery Date">i</span></span>
+            <input class="control-input" type="date" name="edd" />
+          </label>
           <label class="field">
             <span>Payment Status</span>
             <select class="control-input" name="paymentStatus">
@@ -281,11 +295,8 @@
             <span>Delivery Status</span>
             <select class="control-input" name="deliveryStatus">
               <option>Unknown</option>
-              <option>Not Delivered</option>
-              <option>In Transit</option>
               <option>Partially Delivered</option>
               <option>Delivered</option>
-              <option>Delayed</option>
             </select>
           </label>
           <label class="field">
