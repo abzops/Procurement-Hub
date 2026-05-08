@@ -384,7 +384,7 @@ async function loadRemoteStateFromSupabase() {
 }
 
 async function syncStateToSupabase() {
-  if (!useSupabase || remoteSyncInFlight) return;
+  if (!useSupabase || remoteSyncInFlight || queueProcessingInFlight) return;
   remoteSyncInFlight = true;
   try {
     const derived = buildDerived();
@@ -488,36 +488,9 @@ async function syncStateToSupabase() {
       if (error) throw error;
     }
 
-    // delete removed metrics / lines / pos
-    const [existingMetricsRes, existingLinesRes, existingPOsRes] = await Promise.all([
-      supabaseClient.from('product_vendor_metrics').select('metric_key'),
-      supabaseClient.from('po_lines').select('line_id'),
-      supabaseClient.from('purchase_orders').select('po_number')
-    ]);
-    if (existingMetricsRes.error) throw existingMetricsRes.error;
-    if (existingLinesRes.error) throw existingLinesRes.error;
-    if (existingPOsRes.error) throw existingPOsRes.error;
-
-    const currentMetricKeys = new Set(metricsPayload.map(x => x.metric_key));
-    const removeMetricKeys = (existingMetricsRes.data || []).map(x => x.metric_key).filter(k => !currentMetricKeys.has(k));
-    if (removeMetricKeys.length) {
-      const { error } = await supabaseClient.from('product_vendor_metrics').delete().in('metric_key', removeMetricKeys);
-      if (error) throw error;
-    }
-
-    const currentLineIds = new Set(linePayload.map(x => x.line_id));
-    const removeLineIds = (existingLinesRes.data || []).map(x => x.line_id).filter(k => !currentLineIds.has(k));
-    if (removeLineIds.length) {
-      const { error } = await supabaseClient.from('po_lines').delete().in('line_id', removeLineIds);
-      if (error) throw error;
-    }
-
-    const currentPONumbers = new Set(poPayload.map(x => x.po_number));
-    const removePONumbers = (existingPOsRes.data || []).map(x => x.po_number).filter(k => !currentPONumbers.has(k));
-    if (removePONumbers.length) {
-      const { error } = await supabaseClient.from('purchase_orders').delete().in('po_number', removePONumbers);
-      if (error) throw error;
-    }
+    // Queue-based architecture is DB-first. Normal UI sync must not delete rows
+    // that were inserted by Zoho/queue but are not currently present in local state.
+    // Deletions should be handled only through explicit delete actions, not broad diff cleanup.
 
     if (poPayload.length) {
       const { error } = await supabaseClient.from('purchase_orders').upsert(poPayload, { onConflict: 'po_number' });
@@ -605,6 +578,71 @@ function dedupeRecordsByKey(records, keyName) {
     map.set(key, record);
   });
   return Array.from(map.values());
+}
+
+function assertQueueDbPayloadIsWritable(normalized) {
+  const purchaseOrders = Array.isArray(normalized?.purchase_orders) ? normalized.purchase_orders : [];
+  const poLines = Array.isArray(normalized?.po_lines) ? normalized.po_lines : [];
+  if (!purchaseOrders.length) throw new Error('Queue payload has no purchase_orders to write.');
+  if (!poLines.length) throw new Error('Queue payload has no po_lines to write.');
+
+  const invalidPo = purchaseOrders.find(po => !cleanText(po?.po_number) || !cleanText(po?.vendor_name));
+  if (invalidPo) throw new Error('Queue PO is missing required po_number or vendor_name.');
+
+  const invalidLine = poLines.find(line => !cleanText(line?.line_id) || !cleanText(line?.po_number) || !cleanText(line?.vendor_name));
+  if (invalidLine) throw new Error('Queue PO line is missing required line_id, po_number, or vendor_name.');
+}
+
+function buildMetricPayloadFromDbPayload(payload) {
+  const metrics = new Map();
+  (payload.po_lines || []).forEach(line => {
+    const productName = cleanText(line.item_desc);
+    const vendorName = cleanText(line.vendor_name);
+    const lineType = inferLineType(line.item_desc, line.line_type);
+    if (!productName || !vendorName || lineType === 'charge') return;
+    const metricKey = `${productName}__${vendorName}`;
+    const existing = metrics.get(metricKey) || {};
+    metrics.set(metricKey, {
+      metric_key: metricKey,
+      product_name: productName,
+      vendor_name: vendorName,
+      quoted_price: toNumeric(line.item_price),
+      lead_time_days: cleanText(existing.lead_time_days || line.lead_time_days || ''),
+      moq: cleanText(existing.moq || line.moq || ''),
+      rating: cleanText(existing.rating || ''),
+      notes: existing.notes || '',
+      source: cleanText(line.source || existing.source || ''),
+      gstin: cleanText(line.gstin || existing.gstin || '')
+    });
+  });
+  return Array.from(metrics.values());
+}
+
+async function verifyQueueWriteToSupabase(poPayload, linePayload) {
+  const poNumbers = poPayload.map(po => po.po_number).filter(Boolean);
+  const lineIds = linePayload.map(line => line.line_id).filter(Boolean);
+
+  if (poNumbers.length) {
+    const { data, error } = await supabaseClient
+      .from('purchase_orders')
+      .select('po_number')
+      .in('po_number', poNumbers);
+    if (error) throw error;
+    const found = new Set((data || []).map(row => cleanText(row.po_number)));
+    const missing = poNumbers.filter(poNumber => !found.has(poNumber));
+    if (missing.length) throw new Error(`Queue write verification failed. Missing PO(s) in purchase_orders: ${missing.join(', ')}`);
+  }
+
+  if (lineIds.length) {
+    const { data, error } = await supabaseClient
+      .from('po_lines')
+      .select('line_id')
+      .in('line_id', lineIds);
+    if (error) throw error;
+    const found = new Set((data || []).map(row => cleanText(row.line_id)));
+    const missing = lineIds.filter(lineId => !found.has(lineId));
+    if (missing.length) throw new Error(`Queue write verification failed. Missing line(s) in po_lines: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '...' : ''}`);
+  }
 }
 
 function isDbImportPayload(payload) {
@@ -796,6 +834,7 @@ async function upsertDbPayloadToSupabase(payload) {
   if (!useSupabase) throw new Error('Supabase is not enabled.');
   const normalized = normalizeIncomingDbPayload(payload);
   if (!normalized) throw new Error('Unsupported payload shape.');
+  assertQueueDbPayloadIsWritable(normalized);
 
   const vendorsPayload = buildVendorPayloadFromDbPayload(normalized);
   const poPayload = dedupeRecordsByKey((normalized.purchase_orders || []).map(po => ({
@@ -850,6 +889,11 @@ async function upsertDbPayloadToSupabase(payload) {
     manual: Boolean(line.manual)
   })), 'line_id');
 
+  const metricsPayload = dedupeRecordsByKey(buildMetricPayloadFromDbPayload(normalized), 'metric_key');
+
+  if (!poPayload.length) throw new Error('Queue normalized payload produced 0 valid purchase_orders.');
+  if (!linePayload.length) throw new Error('Queue normalized payload produced 0 valid po_lines.');
+
   if (vendorsPayload.length) {
     const { error } = await supabaseClient.from('vendors').upsert(vendorsPayload, { onConflict: 'vendor_name' });
     if (error) throw error;
@@ -862,7 +906,19 @@ async function upsertDbPayloadToSupabase(payload) {
     const { error } = await supabaseClient.from('po_lines').upsert(linePayload, { onConflict: 'line_id' });
     if (error) throw error;
   }
-  return { vendors: vendorsPayload.length, purchaseOrders: poPayload.length, poLines: linePayload.length };
+  if (metricsPayload.length) {
+    const { error } = await supabaseClient.from('product_vendor_metrics').upsert(metricsPayload, { onConflict: 'metric_key' });
+    if (error) throw error;
+  }
+
+  await verifyQueueWriteToSupabase(poPayload, linePayload);
+  return {
+    vendors: vendorsPayload.length,
+    purchaseOrders: poPayload.length,
+    poLines: linePayload.length,
+    productVendorMetrics: metricsPayload.length,
+    poNumbers: poPayload.map(po => po.po_number)
+  };
 }
 
 async function refreshStateFromSupabase() {
@@ -912,6 +968,7 @@ async function processIncomingQueue() {
   }
   if (queueProcessingInFlight) return;
   queueProcessingInFlight = true;
+  clearTimeout(remoteSyncTimer);
   const processBtn = document.getElementById('processQueueBtn');
   if (processBtn) processBtn.disabled = true;
   try {
@@ -934,24 +991,34 @@ async function processIncomingQueue() {
 
     let processed = 0;
     let failed = 0;
+    let syncedPOs = 0;
+    let syncedLines = 0;
+    let syncedMetrics = 0;
+    const failedMessages = [];
     for (const row of pendingRows) {
       try {
         const payload = readQueueRowPayload(row);
         const normalized = normalizeIncomingDbPayload(payload);
         if (!normalized) throw new Error('Unsupported raw payload shape in queue row.');
-        await upsertDbPayloadToSupabase(normalized);
+        const result = await upsertDbPayloadToSupabase(normalized);
+        syncedPOs += Number(result.purchaseOrders || 0);
+        syncedLines += Number(result.poLines || 0);
+        syncedMetrics += Number(result.productVendorMetrics || 0);
         await markQueueRow(row.id, { status: 'processed', error_message: null, processed_at: new Date().toISOString() });
         processed += 1;
       } catch (queueError) {
         failed += 1;
-        await markQueueRow(row.id, { status: 'failed', error_message: String(queueError?.message || queueError), processed_at: null });
+        const message = String(queueError?.message || queueError);
+        failedMessages.push(message);
+        console.error('Queue row failed', queueError);
+        await markQueueRow(row.id, { status: 'failed', error_message: message, processed_at: null });
       }
     }
 
     await refreshStateFromSupabase();
     const message = failed
-      ? `Queue processed. Success: ${processed}. Failed: ${failed}.`
-      : `Queue processed successfully. ${processed} row(s) synced.`;
+      ? `Queue processed. Success: ${processed}. Failed: ${failed}. DB POs: ${syncedPOs}. Lines: ${syncedLines}. First error: ${failedMessages[0] || 'Check failed queue rows.'}`
+      : `Queue processed successfully. Rows: ${processed}. DB POs: ${syncedPOs}. Lines: ${syncedLines}. Metrics: ${syncedMetrics}.`;
     alert(message);
   } catch (error) {
     console.error('Queue processing failed', error);
