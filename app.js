@@ -121,7 +121,7 @@ const state = {
   selectedMetricProduct: null,
   editingPoKey: null,
   showMetricVendorForm: false,
-  showAllLeadAlerts: false,
+  showAllLeadTimeAlerts: false,
   filters: {
     poSearch: '',
     poVendor: 'all',
@@ -303,6 +303,7 @@ async function loadRemoteStateFromSupabase() {
     id: line.line_id,
     poDate: line.po_date || '',
     deliveryDate: line.delivery_date || '',
+    edd: line.edd || line.revised_estimated_delivery_date || line.revised_delivery_date || '',
     deliveryStatus: line.delivery_status || '',
     poNumber: line.po_number,
     reference: '',
@@ -349,7 +350,6 @@ async function loadRemoteStateFromSupabase() {
     row.adjustmentAmount = Number(po?.adjustment_amount || 0);
     row.amountPaid = Number(po?.amount_paid || 0);
     row.balanceDue = po?.balance_due ?? row.balanceDue ?? null;
-    row.edd = cleanText(po?.edd || po?.revised_estimated_delivery_date || po?.revised_delivery_date || row.edd || '');
   });
 
   state.manualRows = [];
@@ -423,7 +423,6 @@ async function syncStateToSupabase() {
       source: po.source || '',
       gstin: po.gstin || '',
       delivery_date: safeDate(po.deliveryDate),
-      edd: safeDate(po.edd),
       payment_status: po.paymentStatus || '',
       po_status: po.poStatus || '',
       delivery_status: po.deliveryStatus || '',
@@ -487,10 +486,36 @@ async function syncStateToSupabase() {
       if (error) throw error;
     }
 
-    // IMPORTANT: normal sync is upsert-only.
-    // Do not delete existing Supabase rows just because they are missing from the current local UI state.
-    // Queue processing can refresh local state asynchronously; broad diff-delete here can erase newly queued POs.
-    // Explicit Delete PO actions handle real deletions separately.
+    // delete removed metrics / lines / pos
+    const [existingMetricsRes, existingLinesRes, existingPOsRes] = await Promise.all([
+      supabaseClient.from('product_vendor_metrics').select('metric_key'),
+      supabaseClient.from('po_lines').select('line_id'),
+      supabaseClient.from('purchase_orders').select('po_number')
+    ]);
+    if (existingMetricsRes.error) throw existingMetricsRes.error;
+    if (existingLinesRes.error) throw existingLinesRes.error;
+    if (existingPOsRes.error) throw existingPOsRes.error;
+
+    const currentMetricKeys = new Set(metricsPayload.map(x => x.metric_key));
+    const removeMetricKeys = (existingMetricsRes.data || []).map(x => x.metric_key).filter(k => !currentMetricKeys.has(k));
+    if (removeMetricKeys.length) {
+      const { error } = await supabaseClient.from('product_vendor_metrics').delete().in('metric_key', removeMetricKeys);
+      if (error) throw error;
+    }
+
+    const currentLineIds = new Set(linePayload.map(x => x.line_id));
+    const removeLineIds = (existingLinesRes.data || []).map(x => x.line_id).filter(k => !currentLineIds.has(k));
+    if (removeLineIds.length) {
+      const { error } = await supabaseClient.from('po_lines').delete().in('line_id', removeLineIds);
+      if (error) throw error;
+    }
+
+    const currentPONumbers = new Set(poPayload.map(x => x.po_number));
+    const removePONumbers = (existingPOsRes.data || []).map(x => x.po_number).filter(k => !currentPONumbers.has(k));
+    if (removePONumbers.length) {
+      const { error } = await supabaseClient.from('purchase_orders').delete().in('po_number', removePONumbers);
+      if (error) throw error;
+    }
 
     if (poPayload.length) {
       const { error } = await supabaseClient.from('purchase_orders').upsert(poPayload, { onConflict: 'po_number' });
@@ -621,6 +646,7 @@ function convertZohoPoPayloadToDbPayload(payload) {
   const poNumber = cleanText(payload.purchaseorder_number || payload.po_number);
   const poDate = cleanText(payload.date || payload.po_date);
   const deliveryDate = cleanText(payload.delivery_date || payload.expected_delivery_date);
+  const edd = cleanText(payload.edd || payload.revised_estimated_delivery_date || payload.revised_delivery_date);
   const vendorName = cleanText(payload.vendor_name);
   const source = cleanText(payload.source_of_supply || payload.source || payload.destination_of_supply);
   const gstin = cleanText(payload.gst_no || payload.gstin);
@@ -651,7 +677,7 @@ function convertZohoPoPayloadToDbPayload(payload) {
       vendor_name: vendorName,
       po_date: poDate,
       delivery_date: deliveryDate || null,
-      edd: safeDate(payload.edd || payload.revised_estimated_delivery_date || payload.revised_delivery_date),
+      edd: edd || null,
       payment_status: paymentStatus,
       po_status: poStatus,
       delivery_status: deliveryStatus,
@@ -688,7 +714,6 @@ function convertZohoPoPayloadToDbPayload(payload) {
       source,
       gstin,
       delivery_date: deliveryDate || null,
-      edd: safeDate(payload.edd || payload.revised_estimated_delivery_date || payload.revised_delivery_date),
       payment_status: paymentStatus,
       po_status: poStatus,
       delivery_status: deliveryStatus,
@@ -777,7 +802,6 @@ async function upsertDbPayloadToSupabase(payload) {
     source: cleanText(po.source),
     gstin: cleanText(po.gstin),
     delivery_date: safeDate(po.delivery_date),
-    edd: safeDate(po.edd || po.revised_estimated_delivery_date || po.revised_delivery_date),
     payment_status: normalizePaymentStatus(po.payment_status || 'Pending'),
     po_status: normalizePoStatus(po.po_status || 'Issued'),
     delivery_status: normalizeDeliveryStatus(po.delivery_status || 'Unknown'),
@@ -972,7 +996,6 @@ function convertDbImportPayloadToLocalRows(payload) {
       id: rowId,
       poDate: cleanText(po.po_date || line.po_date),
       deliveryDate: cleanText(po.delivery_date || line.delivery_date),
-      edd: cleanText(po.edd || po.revised_estimated_delivery_date || po.revised_delivery_date),
       poNumber,
       vendorName: cleanText(po.vendor_name || line.vendor_name),
       source: cleanText(line.source || po.source),
@@ -1144,7 +1167,6 @@ function normalizeDeliveryStatus(value) {
   const raw = normalizeKey(value);
   if (!raw) return 'Unknown';
   if (/^\d{4}-\d{2}-\d{2}$/.test(cleanText(value))) return 'Unknown';
-  if (raw.includes('TRANSIT') || raw.includes('SHIPPED') || raw.includes('DISPATCH')) return 'In Transit';
   if (raw.includes('PART')) return 'Partially Delivered';
   if (['YES', 'Y', 'DELIVERED', 'RECEIVED', 'DONE', 'COMPLETE', 'COMPLETED'].includes(raw)) return 'Delivered';
   return 'Unknown';
@@ -1187,13 +1209,163 @@ function displayDeliveryBadgeClass(po) {
   return isPoDelayed(po) ? 'delayed' : badgeClass(displayDeliveryStatus(po));
 }
 
+function getPoEdd(po) {
+  return cleanText(po?.edd || po?.revisedEstimatedDeliveryDate || po?.revised_estimated_delivery_date || po?.revisedDeliveryDate);
+}
+
+function shouldShowEddField(po = null) {
+  if (po && (isPoDelayed(po) || getPoEdd(po))) return true;
+  const form = document.getElementById('poForm');
+  if (!form) return false;
+  const deliveryStatus = normalizeDeliveryStatus(form.elements.deliveryStatus?.value);
+  if (deliveryStatus === 'Delivered') return false;
+  const deliveryDate = parseDateOnly(form.elements.deliveryDate?.value);
+  return Boolean(deliveryDate && deliveryDate < todayDateOnly());
+}
+
+function refreshEddFieldVisibility(po = null) {
+  const field = document.getElementById('eddField');
+  if (!field) return;
+  field.classList.toggle('hidden', !shouldShowEddField(po));
+}
+
+function addDaysToDate(date, days) {
+  const result = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  result.setDate(result.getDate() + Number(days || 0));
+  return result;
+}
+
+function dateToIsoDate(date) {
+  if (!date || Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function daysBetweenDates(earlier, later) {
+  const oneDay = 24 * 60 * 60 * 1000;
+  return Math.max(0, Math.floor((later.getTime() - earlier.getTime()) / oneDay));
+}
+
+function parseLeadTimeDays(value) {
+  const text = cleanText(value);
+  if (!text) return 0;
+  const direct = Number(text);
+  if (Number.isFinite(direct) && direct > 0) return Math.round(direct);
+  const match = text.match(/\d+(?:\.\d+)?/);
+  const parsed = match ? Number(match[0]) : 0;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+}
+
+function parseLeadTimeFromTerms(value) {
+  const text = cleanText(value);
+  if (!text) return 0;
+  const lower = text.toLowerCase();
+  if (!/(lead|delivery|dispatch).{0,25}(day|week|month)/i.test(text) && !/(day|week|month).{0,25}(lead|delivery|dispatch)/i.test(text)) {
+    return 0;
+  }
+  const weekMatch = lower.match(/(\d+(?:\.\d+)?)(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?))?\s*weeks?/);
+  if (weekMatch) return Math.round(Number(weekMatch[2] || weekMatch[1]) * 7);
+  const monthMatch = lower.match(/(\d+(?:\.\d+)?)(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?))?\s*months?/);
+  if (monthMatch) return Math.round(Number(monthMatch[2] || monthMatch[1]) * 30);
+  const dayMatch = lower.match(/(\d+(?:\.\d+)?)(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?))?\s*(?:working\s*)?days?/);
+  if (dayMatch) return Math.round(Number(dayMatch[2] || dayMatch[1]));
+  return 0;
+}
+
+function getPoLeadTimeInfo(po) {
+  const termsLeadTime = parseLeadTimeFromTerms(po?.terms);
+  if (termsLeadTime > 0) return { days: termsLeadTime, basis: 'PO delivery period' };
+
+  const vendorName = cleanText(po?.vendorName);
+  const vendorLeadTime = parseLeadTimeDays(state.vendorContacts?.[vendorName]?.defaultLeadTimeDays);
+  if (vendorLeadTime > 0) return { days: vendorLeadTime, basis: 'Vendor lead time' };
+
+  const productLeadTimes = (po?.items || [])
+    .filter(item => item && !item.isCharge && inferLineType(item.itemDesc, item.lineType) !== 'charge')
+    .map(item => {
+      const productName = cleanText(item.itemDesc);
+      const itemVendorName = cleanText(item.vendorName || vendorName);
+      if (!productName || !itemVendorName) return 0;
+      const metric = state.productVendorMetrics?.[metricStorageKey(productName, itemVendorName)] || {};
+      return parseLeadTimeDays(metric.leadTimeDays);
+    })
+    .filter(days => days > 0);
+
+  if (productLeadTimes.length) {
+    return { days: Math.max(...productLeadTimes), basis: 'Max product/vendor lead time' };
+  }
+
+  return { days: 0, basis: '' };
+}
+
+function getExpectedPoLeadTimeDate(po, poDate) {
+  const deliveryDate = parseDateOnly(po?.deliveryDate);
+  if (deliveryDate) {
+    return {
+      expectedDate: deliveryDate,
+      leadTimeDays: daysBetweenDates(poDate, deliveryDate),
+      basis: 'PO delivery date'
+    };
+  }
+
+  const leadTime = getPoLeadTimeInfo(po);
+  if (leadTime.days > 0) {
+    return {
+      expectedDate: addDaysToDate(poDate, leadTime.days),
+      leadTimeDays: leadTime.days,
+      basis: leadTime.basis
+    };
+  }
+
+  return { expectedDate: null, leadTimeDays: 0, basis: '' };
+}
+
+function buildLeadTimeAlerts(pos) {
+  const today = todayDateOnly();
+  return (pos || [])
+    .map(po => {
+      if (!po) return null;
+      if (normalizeDeliveryStatus(po.deliveryStatus) === 'Delivered') return null;
+      const poDate = parseDateOnly(po.poDate);
+      if (!poDate) return null;
+      const leadTimeTarget = getExpectedPoLeadTimeDate(po, poDate);
+      if (!leadTimeTarget.expectedDate) return null;
+      if (leadTimeTarget.expectedDate >= today) return null;
+
+      return {
+        poKey: cleanText(po.poKey || po.poNumber),
+        poNumber: cleanText(po.poNumber) || 'No PO',
+        vendorName: cleanText(po.vendorName) || 'Unknown Vendor',
+        source: cleanText(po.source || ''),
+        poDate: dateToIsoDate(poDate),
+        expectedDate: dateToIsoDate(leadTimeTarget.expectedDate),
+        edd: getPoEdd(po),
+        leadTimeDays: leadTimeTarget.leadTimeDays,
+        expectedBasis: leadTimeTarget.basis,
+        daysOverdue: daysBetweenDates(leadTimeTarget.expectedDate, today),
+        deliveryStatus: displayDeliveryStatus(po),
+        productCount: number(po.productCount),
+        itemCount: number(po.itemCount),
+        totalQty: number(po.totalQty),
+        poTotal: number(po.poTotal)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      const aCrossed = parseDateOnly(a.expectedDate)?.getTime() || 0;
+      const bCrossed = parseDateOnly(b.expectedDate)?.getTime() || 0;
+      return bCrossed - aCrossed || b.daysOverdue - a.daysOverdue || a.poNumber.localeCompare(b.poNumber);
+    });
+}
+
 function badgeClass(value) {
   const raw = normalizeKey(value);
   if (raw === 'PAID' || raw === 'DELIVERED') return 'paid delivered';
   if (raw.includes('PART')) return 'partial';
   if (raw === 'ISSUED') return 'issued';
   if (raw === 'BILLED') return 'billed';
-  if (raw === 'IN TRANSIT') return 'in-transit';
   if (raw === 'DELAYED') return 'delayed';
   return 'unknown';
 }
@@ -1213,7 +1385,7 @@ function materializeRow(row) {
     id: cleanText(row.id) || uid('row'),
     poDate: cleanText(row.poDate),
     deliveryDate: cleanText(row.deliveryDate),
-    edd: cleanText(row.edd || row.revisedEstimatedDeliveryDate || row.revised_estimated_delivery_date || row.revised_delivery_date),
+    edd: cleanText(row.edd || row.revisedEstimatedDeliveryDate || row.revised_estimated_delivery_date || row.revisedDeliveryDate),
     poNumber: cleanText(row.poNumber) || cleanText(row.id),
     vendorName: cleanText(row.vendorName) || 'Unknown Vendor',
     source: cleanText(row.source),
@@ -1637,8 +1809,9 @@ function buildDerived() {
     poCount: metric.poCount.size,
     quotedPriceNumber: number(metric.quotedPrice)
   }));
+  const leadTimeAlerts = buildLeadTimeAlerts(pos);
 
-  return { rows, pos, vendors, products, productVendorMetrics };
+  return { rows, pos, vendors, products, productVendorMetrics, leadTimeAlerts };
 }
 
 function statusSortValue(key, value) {
@@ -1652,7 +1825,7 @@ function statusSortValue(key, value) {
     return ranks[cleanText(value).toUpperCase()] ?? ranks[raw] ?? 99;
   }
   if (key === 'deliveryStatus') {
-    const ranks = { UNKNOWN: 0, 'IN TRANSIT': 1, 'PARTIALLY DELIVERED': 2, DELAYED: 3, DELIVERED: 4, MIXED: 5 };
+    const ranks = { UNKNOWN: 0, 'PARTIALLY DELIVERED': 1, DELAYED: 2, DELIVERED: 3, MIXED: 4 };
     return ranks[cleanText(value).toUpperCase()] ?? ranks[raw] ?? 99;
   }
   return null;
@@ -1708,7 +1881,7 @@ function setSelectOptions(id, options, selectedValue, placeholderLabel = 'All') 
   });
 }
 
-function renderKpis({ pos, vendors, products, rows }) {
+function renderKpis({ pos, vendors, products, rows, leadTimeAlerts = [] }) {
   const totalPOValue = pos.reduce((sum, po) => sum + number(po.poTotal), 0);
   const openPaymentValue = pos.reduce((sum, po) => {
     const derived = derivePaymentState(number(po.poTotal), number(po.amountPaid), po.balanceDue);
@@ -1720,6 +1893,7 @@ function renderKpis({ pos, vendors, products, rows }) {
     { label: 'Total PO Value', value: money(totalPOValue), note: `${pos.length} purchase orders` },
     { label: 'Open Payment Value', value: money(openPaymentValue), note: 'Calculated from balance due' },
     { label: 'Delivered POs', value: formatNumber(deliveredCount), note: 'Delivered at PO level' },
+    { label: 'Lead Time Alerts', value: formatNumber(leadTimeAlerts.length), note: leadTimeAlerts.length ? 'POs crossed lead time' : 'No crossed lead times' },
     { label: 'Partially Paid POs', value: formatNumber(partialPaymentCount), note: 'Need payment follow-up' },
     { label: 'Line Items in History', value: formatNumber(rows.length), note: `${products.length} products · ${vendors.length} vendors` }
   ];
@@ -1732,105 +1906,66 @@ function renderKpis({ pos, vendors, products, rows }) {
   `).join('');
 }
 
-
-function addDays(date, days) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
-  const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  next.setDate(next.getDate() + Math.max(0, Number(days) || 0));
-  return next;
-}
-
-function parseLeadTimeDaysFromTerms(terms) {
-  const text = cleanText(terms).toLowerCase();
-  if (!text) return 0;
-  const range = text.match(/(?:delivery|lead\s*time|within|period)[^0-9]{0,30}(\d{1,3})\s*(?:-|to|–|—)\s*(\d{1,3})\s*(?:working\s*)?days?/i);
-  if (range) return Math.max(number(range[1]), number(range[2]));
-  const single = text.match(/(?:delivery|lead\s*time|within|period)[^0-9]{0,30}(\d{1,3})\s*(?:working\s*)?days?/i);
-  return single ? number(single[1]) : 0;
-}
-
-function getPoExpectedDate(po) {
-  const deliveryDate = parseDateOnly(po.deliveryDate);
-  if (deliveryDate) {
-    return { expectedDate: deliveryDate, basis: 'Delivery Date' };
-  }
-
-  const poDate = parseDateOnly(po.poDate);
-  const leadDays = parseLeadTimeDaysFromTerms(po.terms);
-  if (poDate && leadDays > 0) {
-    return { expectedDate: addDays(poDate, leadDays), basis: `${formatNumber(leadDays)} day lead time` };
-  }
-
-  return { expectedDate: null, basis: '' };
-}
-
-function getLeadTimeAlerts(pos) {
-  const today = todayDateOnly();
-  return (pos || [])
-    .map(po => {
-      if (!po || normalizeDeliveryStatus(po.deliveryStatus) === 'Delivered') return null;
-      const { expectedDate, basis } = getPoExpectedDate(po);
-      if (!expectedDate || expectedDate >= today) return null;
-      const daysOverdue = Math.max(1, Math.round((today - expectedDate) / 86400000));
-      return {
-        ...po,
-        expectedDate,
-        expectedDateText: expectedDate.toISOString().slice(0, 10),
-        basis,
-        daysOverdue
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.expectedDate.getTime() - a.expectedDate.getTime());
-}
-
-function renderLeadTimeNotifications(pos) {
+function renderLeadTimeAlerts(alerts = []) {
   const mount = document.getElementById('leadTimeAlerts');
   if (!mount) return;
-
-  const alerts = getLeadTimeAlerts(pos);
+  state.showAllLeadTimeAlerts = Boolean(state.showAllLeadTimeAlerts && alerts.length > 1);
   if (!alerts.length) {
-    state.showAllLeadAlerts = false;
-    mount.innerHTML = '<div class="empty-state">No purchase order has crossed lead time.</div>';
+    mount.innerHTML = `<div class="empty-state">No PO has crossed lead time.</div>`;
     return;
   }
 
-  const visibleAlerts = state.showAllLeadAlerts ? alerts : alerts.slice(0, 1);
-  const hiddenCount = Math.max(0, alerts.length - 1);
+  const visibleLimit = 1;
+  const showAll = Boolean(state.showAllLeadTimeAlerts);
+  const visibleAlerts = showAll ? alerts : alerts.slice(0, visibleLimit);
+  const hiddenCount = Math.max(0, alerts.length - visibleAlerts.length);
   mount.innerHTML = `
-    <div class="alert-summary">
-      <span class="badge delayed">${formatNumber(alerts.length)} alert${alerts.length === 1 ? '' : 's'}</span>
-      <span class="small-text">Newest crossed PO is shown first.</span>
-      ${hiddenCount ? `<button class="icon-drop-btn" type="button" data-action="toggle-lead-alerts" title="${state.showAllLeadAlerts ? 'Hide alerts' : 'Show all alerts'}">${state.showAllLeadAlerts ? '⌃' : '⌄'}</button>` : ''}
+    <div class="alert-summary lead-alert-toolbar">
+      <div class="alert-summary-left">
+        <span class="badge delayed">${formatNumber(alerts.length)} lead time alert${alerts.length === 1 ? '' : 's'}</span>
+        <span class="small-text">Newest crossed PO shown. ${hiddenCount ? `${formatNumber(hiddenCount)} hidden` : 'No hidden alerts'}.</span>
+      </div>
+      ${alerts.length > visibleLimit ? `
+        <button class="ghost-btn small-btn lead-alert-toggle icon-only" data-action="toggle-lead-time-alerts" title="${showAll ? 'Hide alerts' : 'Show all alerts'}" aria-label="${showAll ? 'Hide alerts' : 'Show all alerts'}">
+          <span class="drop-icon">${showAll ? '&#9652;' : '&#9662;'}</span>
+        </button>
+      ` : ''}
     </div>
-    <div class="stack-list lead-alert-list">
-      ${visibleAlerts.map(po => `
-        <div class="lead-alert-card">
-          <div class="lead-alert-main">
-            <div>
-              <div class="lead-alert-title">${escapeHtml(po.poNumber)} · ${escapeHtml(po.vendorName)}</div>
-              <div class="meta-row">
-                <span>Expected: ${formatDate(po.expectedDateText)}</span>
-                <span>${escapeHtml(po.basis)}</span>
-                <span>${formatNumber(po.daysOverdue)} day${po.daysOverdue === 1 ? '' : 's'} overdue</span>
-                <span>${po.productCount || po.itemCount} product${(po.productCount || po.itemCount) === 1 ? '' : 's'}</span>
-                <span>${money(po.poTotal)}</span>
-              </div>
-              ${po.edd ? `<div class="edd-line"><strong>EDD</strong> <span class="info-dot" title="Revised Estimated Delivery Date">i</span> ${formatDate(po.edd)}</div>` : `<div class="edd-line muted"><strong>EDD</strong> <span class="info-dot" title="Revised Estimated Delivery Date">i</span> Not updated</div>`}
-            </div>
-            <div class="inline-actions">
-              <button class="ghost-btn small-btn" data-action="view-products" data-po="${escapeHtml(po.poKey)}">Products</button>
-              <button class="primary-btn small-btn" data-action="edit-po" data-po="${escapeHtml(po.poKey)}">Edit PO</button>
+    ${visibleAlerts.map(alert => `
+      <div class="lead-alert-card">
+        <div class="lead-alert-main">
+          <div>
+            <div class="lead-alert-title">${escapeHtml(alert.poNumber)}</div>
+            <div class="meta-row">
+              <span>${escapeHtml(alert.vendorName)}</span>
+              ${alert.source ? `<span>${escapeHtml(alert.source)}</span>` : ''}
+              <span>${formatNumber(alert.productCount)} product${alert.productCount === 1 ? '' : 's'}</span>
+              <span>Qty: ${formatNumber(alert.totalQty)}</span>
+              <span>Total: ${money(alert.poTotal)}</span>
             </div>
           </div>
+          <span class="badge delayed">${formatNumber(alert.daysOverdue)} day${alert.daysOverdue === 1 ? '' : 's'} overdue</span>
         </div>
-      `).join('')}
-    </div>
+        <div class="meta-row">
+          <span>PO: ${formatDate(alert.poDate)}</span>
+          <span>Crossed: ${formatDate(alert.expectedDate)}</span>
+          <span>EDD <span class="info-icon" title="Revised Estimated Delivery Date">i</span>: ${alert.edd ? formatDate(alert.edd) : 'Not set'}</span>
+          <span>Lead time: ${formatNumber(alert.leadTimeDays)} days</span>
+          <span>Basis: ${escapeHtml(alert.expectedBasis || 'Lead time')}</span>
+          <span>Status: ${escapeHtml(alert.deliveryStatus)}</span>
+        </div>
+        <div class="inline-actions">
+          <button class="text-link" data-action="view-products" data-po="${escapeHtml(alert.poKey)}">View PO Products</button>
+          <button class="ghost-btn small-btn" data-action="edit-po" data-po="${escapeHtml(alert.poKey)}">Edit PO</button>
+        </div>
+      </div>
+    `).join('')}
+    ${hiddenCount ? `<div class="small-text">+${formatNumber(hiddenCount)} more alert${hiddenCount === 1 ? '' : 's'} hidden. Click the dropdown icon to view all.</div>` : ''}
   `;
 }
 
-function renderOverview({ pos, vendors }) {
-  renderLeadTimeNotifications(pos);
+function renderOverview({ pos, vendors, leadTimeAlerts = [] }) {
+  renderLeadTimeAlerts(leadTimeAlerts);
   const recent = sortData(pos, 'poDate-desc').slice(0, 6);
   document.getElementById('recentPOs').innerHTML = recent.length ? recent.map(po => `
     <div class="mini-card">
@@ -1941,7 +2076,7 @@ function renderPurchaseOrders({ pos }) {
         <div class="metric-label">Delivery</div>
         <div class="badge ${displayDeliveryBadgeClass(po)}">${escapeHtml(displayDeliveryStatus(po))}</div>
         <div class="small-text">${formatDate(po.deliveryDate)}</div>
-        ${isPoDelayed(po) ? `<div class="small-text edd-inline"><strong>EDD</strong> <span class="info-dot" title="Revised Estimated Delivery Date">i</span> ${po.edd ? formatDate(po.edd) : 'Not updated'}</div>` : ''}
+        ${isPoDelayed(po) ? `<div class="small-text edd-line">EDD <span class="info-icon" title="Revised Estimated Delivery Date">i</span>: ${getPoEdd(po) ? formatDate(getPoEdd(po)) : 'Not set'}</div>` : ''}
       </div>
       <div class="action-stack">
         <button class="ghost-btn small-btn" data-action="view-products" data-po="${escapeHtml(po.poKey)}">Products</button>
@@ -2317,6 +2452,7 @@ function openPoModal(po = null) {
     form.elements.source.value = po.source || '';
     form.elements.gstin.value = po.gstin || '';
     form.elements.deliveryDate.value = po.deliveryDate || '';
+    if (form.elements.edd) form.elements.edd.value = getPoEdd(po);
     const discountTypeInput = document.getElementById('summaryDiscountType');
     const discountValueInput = document.getElementById('summaryDiscountInput');
     const adjustmentInput = document.getElementById('summaryAdjustmentInput');
@@ -2327,8 +2463,7 @@ function openPoModal(po = null) {
     if (amountPaidInput) amountPaidInput.value = String(number(po.amountPaid || 0));
     form.elements.paymentStatus.value = ['Paid', 'Partially Paid', 'Pending', 'Unknown'].includes(po.paymentStatus) ? po.paymentStatus : 'Unknown';
     form.elements.poStatus.value = ['Issued', 'Billed', 'Closed', 'Unknown'].includes(po.poStatus) ? po.poStatus : 'Unknown';
-    form.elements.deliveryStatus.value = ['Unknown', 'In Transit', 'Partially Delivered', 'Delivered'].includes(po.deliveryStatus) ? po.deliveryStatus : 'Unknown';
-    if (form.elements.edd) form.elements.edd.value = po.edd || '';
+    form.elements.deliveryStatus.value = ['Unknown', 'Partially Delivered', 'Delivered'].includes(po.deliveryStatus) ? po.deliveryStatus : 'Unknown';
     form.elements.terms.value = po.terms || '';
     po.items.forEach(item => linesMount.appendChild(createLineItemCard(item)));
   } else {
@@ -2350,6 +2485,7 @@ function openPoModal(po = null) {
   }
   refreshLineIndexes();
   recalcPoSummary();
+  refreshEddFieldVisibility(po);
   modal.classList.remove('hidden');
 }
 
@@ -2415,7 +2551,7 @@ function collectPoFormPayload(existingPo = null) {
   const source = cleanText(form.elements.source.value);
   const gstin = cleanText(form.elements.gstin.value);
   const deliveryDate = form.elements.deliveryDate.value;
-  const edd = form.elements.edd?.value || '';
+  const edd = form.elements.edd ? form.elements.edd.value : '';
   const { discountType, discountInputValue, adjustmentAmount } = getDiscountStateFromInputs();
   const amountPaidInput = number(document.getElementById('summaryAmountPaidInput')?.value);
   const paymentStatus = normalizePaymentStatus(form.elements.paymentStatus.value);
@@ -2535,25 +2671,6 @@ function applyPoChanges(existingPo, payload) {
   renderAll();
 }
 
-
-async function deletePurchaseOrderFromSupabase(poNumber) {
-  if (!useSupabase || !poNumber) return;
-  const cleanPoNumber = cleanText(poNumber);
-  if (!cleanPoNumber) return;
-
-  const { error: lineError } = await supabaseClient
-    .from('po_lines')
-    .delete()
-    .eq('po_number', cleanPoNumber);
-  if (lineError) throw lineError;
-
-  const { error: poError } = await supabaseClient
-    .from('purchase_orders')
-    .delete()
-    .eq('po_number', cleanPoNumber);
-  if (poError) throw poError;
-}
-
 function deletePurchaseOrder(poKey) {
   const { po } = getDerivedAndGroupedPo(poKey);
   if (!po) return;
@@ -2567,13 +2684,6 @@ function deletePurchaseOrder(poKey) {
       state.rowOverrides[item.id] = { ...(state.rowOverrides[item.id] || {}), __deleted: true };
     }
   });
-
-  if (useSupabase) {
-    deletePurchaseOrderFromSupabase(po.poNumber).catch(error => {
-      console.error('Explicit PO delete failed', error);
-      alert(`PO removed locally, but Supabase delete failed: ${error.message || error}`);
-    });
-  }
 
   saveState();
   renderAll();
@@ -2600,7 +2710,7 @@ function openProductDetailModal(poKey) {
       <div class="detail-card"><div class="k">Balance Due</div><div class="v">${money(po.balanceDue || 0)}</div></div>
       <div class="detail-card"><div class="k">Payment</div><div class="v"><span class="badge ${badgeClass(po.paymentStatus)}">${escapeHtml(po.paymentStatus)}</span></div></div>
       <div class="detail-card"><div class="k">Delivery</div><div class="v"><span class="badge ${displayDeliveryBadgeClass(po)}">${escapeHtml(displayDeliveryStatus(po))}</span> <span class="small-text">${formatDate(po.deliveryDate)}</span></div></div>
-      ${isPoDelayed(po) ? `<div class="detail-card"><div class="k">EDD <span class="info-dot" title="Revised Estimated Delivery Date">i</span></div><div class="v">${po.edd ? formatDate(po.edd) : 'Not updated'}</div></div>` : ''}
+      ${isPoDelayed(po) ? `<div class="detail-card"><div class="k">EDD <span class="info-icon" title="Revised Estimated Delivery Date">i</span></div><div class="v">${getPoEdd(po) ? formatDate(getPoEdd(po)) : 'Not set'}</div></div>` : ''}
     </div>
 
     ${groupedItems.length ? `
@@ -3029,6 +3139,10 @@ function bindGlobalEvents() {
   document.getElementById('summaryAmountPaidInput')?.addEventListener('input', recalcPoSummary);
   document.getElementById('summaryAmountPaidInput')?.addEventListener('change', recalcPoSummary);
 
+  const poForm = document.getElementById('poForm');
+  poForm?.elements.deliveryDate?.addEventListener('change', () => refreshEddFieldVisibility());
+  poForm?.elements.deliveryStatus?.addEventListener('change', () => refreshEddFieldVisibility());
+
   document.getElementById('poForm').addEventListener('submit', event => {
     event.preventDefault();
     const existing = state.editingPoKey ? getDerivedAndGroupedPo(state.editingPoKey).po : null;
@@ -3038,15 +3152,7 @@ function bindGlobalEvents() {
 
   document.getElementById('poList').addEventListener('click', handlePoAction);
   document.getElementById('recentPOs').addEventListener('click', handlePoAction);
-  document.getElementById('leadTimeAlerts')?.addEventListener('click', event => {
-    const toggle = event.target.closest('[data-action="toggle-lead-alerts"]');
-    if (toggle) {
-      state.showAllLeadAlerts = !state.showAllLeadAlerts;
-      renderAll();
-      return;
-    }
-    handlePoAction(event);
-  });
+  document.getElementById('leadTimeAlerts')?.addEventListener('click', handlePoAction);
   document.getElementById('detailModalContent').addEventListener('click', handlePoAction);
 
   document.getElementById('vendorForm').addEventListener('click', event => {
@@ -3119,6 +3225,12 @@ function handlePoAction(event) {
   const action = button.dataset.action;
   const poKey = button.dataset.po;
   if (!action) return;
+
+  if (action === 'toggle-lead-time-alerts') {
+    state.showAllLeadTimeAlerts = !state.showAllLeadTimeAlerts;
+    renderAll();
+    return;
+  }
 
   if (action === 'view-products') {
     openProductDetailModal(poKey);
