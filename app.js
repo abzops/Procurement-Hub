@@ -121,7 +121,6 @@ const state = {
   selectedMetricProduct: null,
   editingPoKey: null,
   showMetricVendorForm: false,
-  showAllLeadTimeAlerts: false,
   filters: {
     poSearch: '',
     poVendor: 'all',
@@ -303,7 +302,6 @@ async function loadRemoteStateFromSupabase() {
     id: line.line_id,
     poDate: line.po_date || '',
     deliveryDate: line.delivery_date || '',
-    edd: '',
     deliveryStatus: line.delivery_status || '',
     poNumber: line.po_number,
     reference: '',
@@ -344,7 +342,6 @@ async function loadRemoteStateFromSupabase() {
   });
   baseRows.forEach(row => {
     const po = poMap.get(row.poNumber);
-    row.edd = po?.edd || po?.revised_estimated_delivery_date || po?.revised_delivery_date || row.edd || '';
     row.discountAmount = Number(po?.discount_amount || 0);
     row.discountType = cleanText(po?.discount_type || 'amount').toLowerCase() === 'percent' ? 'percent' : 'amount';
     row.discountInputValue = Number(po?.discount_input_value ?? po?.discount_amount ?? 0);
@@ -384,7 +381,7 @@ async function loadRemoteStateFromSupabase() {
 }
 
 async function syncStateToSupabase() {
-  if (!useSupabase || remoteSyncInFlight || queueProcessingInFlight) return;
+  if (!useSupabase || remoteSyncInFlight) return;
   remoteSyncInFlight = true;
   try {
     const derived = buildDerived();
@@ -488,9 +485,10 @@ async function syncStateToSupabase() {
       if (error) throw error;
     }
 
-    // Queue-based architecture is DB-first. Normal UI sync must not delete rows
-    // that were inserted by Zoho/queue but are not currently present in local state.
-    // Deletions should be handled only through explicit delete actions, not broad diff cleanup.
+    // IMPORTANT: normal sync is upsert-only.
+    // Do not delete existing Supabase rows just because they are missing from the current local UI state.
+    // Queue processing can refresh local state asynchronously; broad diff-delete here can erase newly queued POs.
+    // Explicit Delete PO actions handle real deletions separately.
 
     if (poPayload.length) {
       const { error } = await supabaseClient.from('purchase_orders').upsert(poPayload, { onConflict: 'po_number' });
@@ -580,71 +578,6 @@ function dedupeRecordsByKey(records, keyName) {
   return Array.from(map.values());
 }
 
-function assertQueueDbPayloadIsWritable(normalized) {
-  const purchaseOrders = Array.isArray(normalized?.purchase_orders) ? normalized.purchase_orders : [];
-  const poLines = Array.isArray(normalized?.po_lines) ? normalized.po_lines : [];
-  if (!purchaseOrders.length) throw new Error('Queue payload has no purchase_orders to write.');
-  if (!poLines.length) throw new Error('Queue payload has no po_lines to write.');
-
-  const invalidPo = purchaseOrders.find(po => !cleanText(po?.po_number) || !cleanText(po?.vendor_name));
-  if (invalidPo) throw new Error('Queue PO is missing required po_number or vendor_name.');
-
-  const invalidLine = poLines.find(line => !cleanText(line?.line_id) || !cleanText(line?.po_number) || !cleanText(line?.vendor_name));
-  if (invalidLine) throw new Error('Queue PO line is missing required line_id, po_number, or vendor_name.');
-}
-
-function buildMetricPayloadFromDbPayload(payload) {
-  const metrics = new Map();
-  (payload.po_lines || []).forEach(line => {
-    const productName = cleanText(line.item_desc);
-    const vendorName = cleanText(line.vendor_name);
-    const lineType = inferLineType(line.item_desc, line.line_type);
-    if (!productName || !vendorName || lineType === 'charge') return;
-    const metricKey = `${productName}__${vendorName}`;
-    const existing = metrics.get(metricKey) || {};
-    metrics.set(metricKey, {
-      metric_key: metricKey,
-      product_name: productName,
-      vendor_name: vendorName,
-      quoted_price: toNumeric(line.item_price),
-      lead_time_days: cleanText(existing.lead_time_days || line.lead_time_days || ''),
-      moq: cleanText(existing.moq || line.moq || ''),
-      rating: cleanText(existing.rating || ''),
-      notes: existing.notes || '',
-      source: cleanText(line.source || existing.source || ''),
-      gstin: cleanText(line.gstin || existing.gstin || '')
-    });
-  });
-  return Array.from(metrics.values());
-}
-
-async function verifyQueueWriteToSupabase(poPayload, linePayload) {
-  const poNumbers = poPayload.map(po => po.po_number).filter(Boolean);
-  const lineIds = linePayload.map(line => line.line_id).filter(Boolean);
-
-  if (poNumbers.length) {
-    const { data, error } = await supabaseClient
-      .from('purchase_orders')
-      .select('po_number')
-      .in('po_number', poNumbers);
-    if (error) throw error;
-    const found = new Set((data || []).map(row => cleanText(row.po_number)));
-    const missing = poNumbers.filter(poNumber => !found.has(poNumber));
-    if (missing.length) throw new Error(`Queue write verification failed. Missing PO(s) in purchase_orders: ${missing.join(', ')}`);
-  }
-
-  if (lineIds.length) {
-    const { data, error } = await supabaseClient
-      .from('po_lines')
-      .select('line_id')
-      .in('line_id', lineIds);
-    if (error) throw error;
-    const found = new Set((data || []).map(row => cleanText(row.line_id)));
-    const missing = lineIds.filter(lineId => !found.has(lineId));
-    if (missing.length) throw new Error(`Queue write verification failed. Missing line(s) in po_lines: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '...' : ''}`);
-  }
-}
-
 function isDbImportPayload(payload) {
   return Boolean(
     payload &&
@@ -686,7 +619,6 @@ function convertZohoPoPayloadToDbPayload(payload) {
   const poNumber = cleanText(payload.purchaseorder_number || payload.po_number);
   const poDate = cleanText(payload.date || payload.po_date);
   const deliveryDate = cleanText(payload.delivery_date || payload.expected_delivery_date);
-  const edd = cleanText(payload.edd || payload.revised_estimated_delivery_date || payload.revised_delivery_date);
   const vendorName = cleanText(payload.vendor_name);
   const source = cleanText(payload.source_of_supply || payload.source || payload.destination_of_supply);
   const gstin = cleanText(payload.gst_no || payload.gstin);
@@ -717,7 +649,7 @@ function convertZohoPoPayloadToDbPayload(payload) {
       vendor_name: vendorName,
       po_date: poDate,
       delivery_date: deliveryDate || null,
-      edd: edd || null,
+      edd: safeDate(payload.edd || payload.revised_estimated_delivery_date || payload.revised_delivery_date),
       payment_status: paymentStatus,
       po_status: poStatus,
       delivery_status: deliveryStatus,
@@ -754,7 +686,6 @@ function convertZohoPoPayloadToDbPayload(payload) {
       source,
       gstin,
       delivery_date: deliveryDate || null,
-      edd: edd || null,
       payment_status: paymentStatus,
       po_status: poStatus,
       delivery_status: deliveryStatus,
@@ -834,7 +765,6 @@ async function upsertDbPayloadToSupabase(payload) {
   if (!useSupabase) throw new Error('Supabase is not enabled.');
   const normalized = normalizeIncomingDbPayload(payload);
   if (!normalized) throw new Error('Unsupported payload shape.');
-  assertQueueDbPayloadIsWritable(normalized);
 
   const vendorsPayload = buildVendorPayloadFromDbPayload(normalized);
   const poPayload = dedupeRecordsByKey((normalized.purchase_orders || []).map(po => ({
@@ -889,11 +819,6 @@ async function upsertDbPayloadToSupabase(payload) {
     manual: Boolean(line.manual)
   })), 'line_id');
 
-  const metricsPayload = dedupeRecordsByKey(buildMetricPayloadFromDbPayload(normalized), 'metric_key');
-
-  if (!poPayload.length) throw new Error('Queue normalized payload produced 0 valid purchase_orders.');
-  if (!linePayload.length) throw new Error('Queue normalized payload produced 0 valid po_lines.');
-
   if (vendorsPayload.length) {
     const { error } = await supabaseClient.from('vendors').upsert(vendorsPayload, { onConflict: 'vendor_name' });
     if (error) throw error;
@@ -906,19 +831,7 @@ async function upsertDbPayloadToSupabase(payload) {
     const { error } = await supabaseClient.from('po_lines').upsert(linePayload, { onConflict: 'line_id' });
     if (error) throw error;
   }
-  if (metricsPayload.length) {
-    const { error } = await supabaseClient.from('product_vendor_metrics').upsert(metricsPayload, { onConflict: 'metric_key' });
-    if (error) throw error;
-  }
-
-  await verifyQueueWriteToSupabase(poPayload, linePayload);
-  return {
-    vendors: vendorsPayload.length,
-    purchaseOrders: poPayload.length,
-    poLines: linePayload.length,
-    productVendorMetrics: metricsPayload.length,
-    poNumbers: poPayload.map(po => po.po_number)
-  };
+  return { vendors: vendorsPayload.length, purchaseOrders: poPayload.length, poLines: linePayload.length };
 }
 
 async function refreshStateFromSupabase() {
@@ -968,7 +881,6 @@ async function processIncomingQueue() {
   }
   if (queueProcessingInFlight) return;
   queueProcessingInFlight = true;
-  clearTimeout(remoteSyncTimer);
   const processBtn = document.getElementById('processQueueBtn');
   if (processBtn) processBtn.disabled = true;
   try {
@@ -991,34 +903,24 @@ async function processIncomingQueue() {
 
     let processed = 0;
     let failed = 0;
-    let syncedPOs = 0;
-    let syncedLines = 0;
-    let syncedMetrics = 0;
-    const failedMessages = [];
     for (const row of pendingRows) {
       try {
         const payload = readQueueRowPayload(row);
         const normalized = normalizeIncomingDbPayload(payload);
         if (!normalized) throw new Error('Unsupported raw payload shape in queue row.');
-        const result = await upsertDbPayloadToSupabase(normalized);
-        syncedPOs += Number(result.purchaseOrders || 0);
-        syncedLines += Number(result.poLines || 0);
-        syncedMetrics += Number(result.productVendorMetrics || 0);
+        await upsertDbPayloadToSupabase(normalized);
         await markQueueRow(row.id, { status: 'processed', error_message: null, processed_at: new Date().toISOString() });
         processed += 1;
       } catch (queueError) {
         failed += 1;
-        const message = String(queueError?.message || queueError);
-        failedMessages.push(message);
-        console.error('Queue row failed', queueError);
-        await markQueueRow(row.id, { status: 'failed', error_message: message, processed_at: null });
+        await markQueueRow(row.id, { status: 'failed', error_message: String(queueError?.message || queueError), processed_at: null });
       }
     }
 
     await refreshStateFromSupabase();
     const message = failed
-      ? `Queue processed. Success: ${processed}. Failed: ${failed}. DB POs: ${syncedPOs}. Lines: ${syncedLines}. First error: ${failedMessages[0] || 'Check failed queue rows.'}`
-      : `Queue processed successfully. Rows: ${processed}. DB POs: ${syncedPOs}. Lines: ${syncedLines}. Metrics: ${syncedMetrics}.`;
+      ? `Queue processed. Success: ${processed}. Failed: ${failed}.`
+      : `Queue processed successfully. ${processed} row(s) synced.`;
     alert(message);
   } catch (error) {
     console.error('Queue processing failed', error);
@@ -1240,7 +1142,6 @@ function normalizeDeliveryStatus(value) {
   if (!raw) return 'Unknown';
   if (/^\d{4}-\d{2}-\d{2}$/.test(cleanText(value))) return 'Unknown';
   if (raw.includes('PART')) return 'Partially Delivered';
-  if (raw.includes('TRANSIT') || raw.includes('SHIPPED') || raw.includes('DISPATCH') || raw.includes('ONWAY') || raw.includes('ENROUTE')) return 'In Transit';
   if (['YES', 'Y', 'DELIVERED', 'RECEIVED', 'DONE', 'COMPLETE', 'COMPLETED'].includes(raw)) return 'Delivered';
   return 'Unknown';
 }
@@ -1282,157 +1183,6 @@ function displayDeliveryBadgeClass(po) {
   return isPoDelayed(po) ? 'delayed' : badgeClass(displayDeliveryStatus(po));
 }
 
-function getPoEdd(po) {
-  return cleanText(po?.edd || po?.revisedEstimatedDeliveryDate || po?.revised_estimated_delivery_date || po?.revisedDeliveryDate);
-}
-
-function shouldShowEddField(po = null) {
-  if (po && (isPoDelayed(po) || getPoEdd(po))) return true;
-  const form = document.getElementById('poForm');
-  if (!form) return false;
-  const deliveryStatus = normalizeDeliveryStatus(form.elements.deliveryStatus?.value);
-  if (deliveryStatus === 'Delivered') return false;
-  const deliveryDate = parseDateOnly(form.elements.deliveryDate?.value);
-  return Boolean(deliveryDate && deliveryDate < todayDateOnly());
-}
-
-function refreshEddFieldVisibility(po = null) {
-  const field = document.getElementById('eddField');
-  if (!field) return;
-  field.classList.toggle('hidden', !shouldShowEddField(po));
-}
-
-function addDaysToDate(date, days) {
-  const result = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  result.setDate(result.getDate() + Number(days || 0));
-  return result;
-}
-
-function dateToIsoDate(date) {
-  if (!date || Number.isNaN(date.getTime())) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function daysBetweenDates(earlier, later) {
-  const oneDay = 24 * 60 * 60 * 1000;
-  return Math.max(0, Math.floor((later.getTime() - earlier.getTime()) / oneDay));
-}
-
-function parseLeadTimeDays(value) {
-  const text = cleanText(value);
-  if (!text) return 0;
-  const direct = Number(text);
-  if (Number.isFinite(direct) && direct > 0) return Math.round(direct);
-  const match = text.match(/\d+(?:\.\d+)?/);
-  const parsed = match ? Number(match[0]) : 0;
-  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
-}
-
-function parseLeadTimeFromTerms(value) {
-  const text = cleanText(value);
-  if (!text) return 0;
-  const lower = text.toLowerCase();
-  if (!/(lead|delivery|dispatch).{0,25}(day|week|month)/i.test(text) && !/(day|week|month).{0,25}(lead|delivery|dispatch)/i.test(text)) {
-    return 0;
-  }
-  const weekMatch = lower.match(/(\d+(?:\.\d+)?)(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?))?\s*weeks?/);
-  if (weekMatch) return Math.round(Number(weekMatch[2] || weekMatch[1]) * 7);
-  const monthMatch = lower.match(/(\d+(?:\.\d+)?)(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?))?\s*months?/);
-  if (monthMatch) return Math.round(Number(monthMatch[2] || monthMatch[1]) * 30);
-  const dayMatch = lower.match(/(\d+(?:\.\d+)?)(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?))?\s*(?:working\s*)?days?/);
-  if (dayMatch) return Math.round(Number(dayMatch[2] || dayMatch[1]));
-  return 0;
-}
-
-function getPoLeadTimeInfo(po) {
-  const termsLeadTime = parseLeadTimeFromTerms(po?.terms);
-  if (termsLeadTime > 0) return { days: termsLeadTime, basis: 'PO delivery period' };
-
-  const vendorName = cleanText(po?.vendorName);
-  const vendorLeadTime = parseLeadTimeDays(state.vendorContacts?.[vendorName]?.defaultLeadTimeDays);
-  if (vendorLeadTime > 0) return { days: vendorLeadTime, basis: 'Vendor lead time' };
-
-  const productLeadTimes = (po?.items || [])
-    .filter(item => item && !item.isCharge && inferLineType(item.itemDesc, item.lineType) !== 'charge')
-    .map(item => {
-      const productName = cleanText(item.itemDesc);
-      const itemVendorName = cleanText(item.vendorName || vendorName);
-      if (!productName || !itemVendorName) return 0;
-      const metric = state.productVendorMetrics?.[metricStorageKey(productName, itemVendorName)] || {};
-      return parseLeadTimeDays(metric.leadTimeDays);
-    })
-    .filter(days => days > 0);
-
-  if (productLeadTimes.length) {
-    return { days: Math.max(...productLeadTimes), basis: 'Max product/vendor lead time' };
-  }
-
-  return { days: 0, basis: '' };
-}
-
-function getExpectedPoLeadTimeDate(po, poDate) {
-  const deliveryDate = parseDateOnly(po?.deliveryDate);
-  if (deliveryDate) {
-    return {
-      expectedDate: deliveryDate,
-      leadTimeDays: daysBetweenDates(poDate, deliveryDate),
-      basis: 'PO delivery date'
-    };
-  }
-
-  const leadTime = getPoLeadTimeInfo(po);
-  if (leadTime.days > 0) {
-    return {
-      expectedDate: addDaysToDate(poDate, leadTime.days),
-      leadTimeDays: leadTime.days,
-      basis: leadTime.basis
-    };
-  }
-
-  return { expectedDate: null, leadTimeDays: 0, basis: '' };
-}
-
-function buildLeadTimeAlerts(pos) {
-  const today = todayDateOnly();
-  return (pos || [])
-    .map(po => {
-      if (!po) return null;
-      if (normalizeDeliveryStatus(po.deliveryStatus) === 'Delivered') return null;
-      const poDate = parseDateOnly(po.poDate);
-      if (!poDate) return null;
-      const leadTimeTarget = getExpectedPoLeadTimeDate(po, poDate);
-      if (!leadTimeTarget.expectedDate) return null;
-      if (leadTimeTarget.expectedDate >= today) return null;
-
-      return {
-        poKey: cleanText(po.poKey || po.poNumber),
-        poNumber: cleanText(po.poNumber) || 'No PO',
-        vendorName: cleanText(po.vendorName) || 'Unknown Vendor',
-        source: cleanText(po.source || ''),
-        poDate: dateToIsoDate(poDate),
-        expectedDate: dateToIsoDate(leadTimeTarget.expectedDate),
-        edd: getPoEdd(po),
-        leadTimeDays: leadTimeTarget.leadTimeDays,
-        expectedBasis: leadTimeTarget.basis,
-        daysOverdue: daysBetweenDates(leadTimeTarget.expectedDate, today),
-        deliveryStatus: displayDeliveryStatus(po),
-        productCount: number(po.productCount),
-        itemCount: number(po.itemCount),
-        totalQty: number(po.totalQty),
-        poTotal: number(po.poTotal)
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => {
-      const aCrossed = parseDateOnly(a.expectedDate)?.getTime() || 0;
-      const bCrossed = parseDateOnly(b.expectedDate)?.getTime() || 0;
-      return bCrossed - aCrossed || b.daysOverdue - a.daysOverdue || a.poNumber.localeCompare(b.poNumber);
-    });
-}
-
 function badgeClass(value) {
   const raw = normalizeKey(value);
   if (raw === 'PAID' || raw === 'DELIVERED') return 'paid delivered';
@@ -1458,7 +1208,6 @@ function materializeRow(row) {
     id: cleanText(row.id) || uid('row'),
     poDate: cleanText(row.poDate),
     deliveryDate: cleanText(row.deliveryDate),
-    edd: cleanText(row.edd || row.revisedEstimatedDeliveryDate || row.revised_estimated_delivery_date || row.revisedDeliveryDate),
     poNumber: cleanText(row.poNumber) || cleanText(row.id),
     vendorName: cleanText(row.vendorName) || 'Unknown Vendor',
     source: cleanText(row.source),
@@ -1632,7 +1381,6 @@ function groupedPOs(rows) {
       source: first.source || '',
       terms: first.terms || '',
       deliveryDate: summarizeDate(items, 'deliveryDate') || first.deliveryDate || '',
-      edd: summarizeDate(items, 'edd') || first.edd || '',
       paymentStatus: summarizeStatus(items, 'paymentStatus'),
       poStatus: summarizeStatus(items, 'poStatus'),
       deliveryStatus: summarizeStatus(items, 'deliveryStatus'),
@@ -1882,9 +1630,8 @@ function buildDerived() {
     poCount: metric.poCount.size,
     quotedPriceNumber: number(metric.quotedPrice)
   }));
-  const leadTimeAlerts = buildLeadTimeAlerts(pos);
 
-  return { rows, pos, vendors, products, productVendorMetrics, leadTimeAlerts };
+  return { rows, pos, vendors, products, productVendorMetrics };
 }
 
 function statusSortValue(key, value) {
@@ -1954,7 +1701,7 @@ function setSelectOptions(id, options, selectedValue, placeholderLabel = 'All') 
   });
 }
 
-function renderKpis({ pos, vendors, products, rows, leadTimeAlerts = [] }) {
+function renderKpis({ pos, vendors, products, rows }) {
   const totalPOValue = pos.reduce((sum, po) => sum + number(po.poTotal), 0);
   const openPaymentValue = pos.reduce((sum, po) => {
     const derived = derivePaymentState(number(po.poTotal), number(po.amountPaid), po.balanceDue);
@@ -1966,7 +1713,6 @@ function renderKpis({ pos, vendors, products, rows, leadTimeAlerts = [] }) {
     { label: 'Total PO Value', value: money(totalPOValue), note: `${pos.length} purchase orders` },
     { label: 'Open Payment Value', value: money(openPaymentValue), note: 'Calculated from balance due' },
     { label: 'Delivered POs', value: formatNumber(deliveredCount), note: 'Delivered at PO level' },
-    { label: 'Lead Time Alerts', value: formatNumber(leadTimeAlerts.length), note: leadTimeAlerts.length ? 'POs crossed lead time' : 'No crossed lead times' },
     { label: 'Partially Paid POs', value: formatNumber(partialPaymentCount), note: 'Need payment follow-up' },
     { label: 'Line Items in History', value: formatNumber(rows.length), note: `${products.length} products · ${vendors.length} vendors` }
   ];
@@ -1979,66 +1725,7 @@ function renderKpis({ pos, vendors, products, rows, leadTimeAlerts = [] }) {
   `).join('');
 }
 
-function renderLeadTimeAlerts(alerts = []) {
-  const mount = document.getElementById('leadTimeAlerts');
-  if (!mount) return;
-  state.showAllLeadTimeAlerts = Boolean(state.showAllLeadTimeAlerts && alerts.length > 1);
-  if (!alerts.length) {
-    mount.innerHTML = `<div class="empty-state">No PO has crossed lead time.</div>`;
-    return;
-  }
-
-  const visibleLimit = 1;
-  const showAll = Boolean(state.showAllLeadTimeAlerts);
-  const visibleAlerts = showAll ? alerts : alerts.slice(0, visibleLimit);
-  const hiddenCount = Math.max(0, alerts.length - visibleAlerts.length);
-  mount.innerHTML = `
-    <div class="alert-summary lead-alert-toolbar">
-      <div class="alert-summary-left">
-        <span class="badge delayed">${formatNumber(alerts.length)} lead time alert${alerts.length === 1 ? '' : 's'}</span>
-        <span class="small-text">Newest crossed PO shown. ${hiddenCount ? `${formatNumber(hiddenCount)} hidden` : 'No hidden alerts'}.</span>
-      </div>
-      ${alerts.length > visibleLimit ? `
-        <button class="ghost-btn small-btn lead-alert-toggle icon-only" data-action="toggle-lead-time-alerts" title="${showAll ? 'Hide alerts' : 'Show all alerts'}" aria-label="${showAll ? 'Hide alerts' : 'Show all alerts'}">
-          <span class="drop-icon">${showAll ? '&#9652;' : '&#9662;'}</span>
-        </button>
-      ` : ''}
-    </div>
-    ${visibleAlerts.map(alert => `
-      <div class="lead-alert-card">
-        <div class="lead-alert-main">
-          <div>
-            <div class="lead-alert-title">${escapeHtml(alert.poNumber)}</div>
-            <div class="meta-row">
-              <span>${escapeHtml(alert.vendorName)}</span>
-              ${alert.source ? `<span>${escapeHtml(alert.source)}</span>` : ''}
-              <span>${formatNumber(alert.productCount)} product${alert.productCount === 1 ? '' : 's'}</span>
-              <span>Qty: ${formatNumber(alert.totalQty)}</span>
-              <span>Total: ${money(alert.poTotal)}</span>
-            </div>
-          </div>
-          <span class="badge delayed">${formatNumber(alert.daysOverdue)} day${alert.daysOverdue === 1 ? '' : 's'} overdue</span>
-        </div>
-        <div class="meta-row">
-          <span>PO: ${formatDate(alert.poDate)}</span>
-          <span>Crossed: ${formatDate(alert.expectedDate)}</span>
-          <span>EDD <span class="info-icon" title="Revised Estimated Delivery Date">i</span>: ${alert.edd ? formatDate(alert.edd) : 'Not set'}</span>
-          <span>Lead time: ${formatNumber(alert.leadTimeDays)} days</span>
-          <span>Basis: ${escapeHtml(alert.expectedBasis || 'Lead time')}</span>
-          <span>Status: ${escapeHtml(alert.deliveryStatus)}</span>
-        </div>
-        <div class="inline-actions">
-          <button class="text-link" data-action="view-products" data-po="${escapeHtml(alert.poKey)}">View PO Products</button>
-          <button class="ghost-btn small-btn" data-action="edit-po" data-po="${escapeHtml(alert.poKey)}">Edit PO</button>
-        </div>
-      </div>
-    `).join('')}
-    ${hiddenCount ? `<div class="small-text">+${formatNumber(hiddenCount)} more alert${hiddenCount === 1 ? '' : 's'} hidden. Click the dropdown icon to view all.</div>` : ''}
-  `;
-}
-
-function renderOverview({ pos, vendors, leadTimeAlerts = [] }) {
-  renderLeadTimeAlerts(leadTimeAlerts);
+function renderOverview({ pos, vendors }) {
   const recent = sortData(pos, 'poDate-desc').slice(0, 6);
   document.getElementById('recentPOs').innerHTML = recent.length ? recent.map(po => `
     <div class="mini-card">
@@ -2149,7 +1836,6 @@ function renderPurchaseOrders({ pos }) {
         <div class="metric-label">Delivery</div>
         <div class="badge ${displayDeliveryBadgeClass(po)}">${escapeHtml(displayDeliveryStatus(po))}</div>
         <div class="small-text">${formatDate(po.deliveryDate)}</div>
-        ${isPoDelayed(po) ? `<div class="small-text edd-line">EDD <span class="info-icon" title="Revised Estimated Delivery Date">i</span>: ${getPoEdd(po) ? formatDate(getPoEdd(po)) : 'Not set'}</div>` : ''}
       </div>
       <div class="action-stack">
         <button class="ghost-btn small-btn" data-action="view-products" data-po="${escapeHtml(po.poKey)}">Products</button>
@@ -2525,7 +2211,6 @@ function openPoModal(po = null) {
     form.elements.source.value = po.source || '';
     form.elements.gstin.value = po.gstin || '';
     form.elements.deliveryDate.value = po.deliveryDate || '';
-    if (form.elements.edd) form.elements.edd.value = getPoEdd(po);
     const discountTypeInput = document.getElementById('summaryDiscountType');
     const discountValueInput = document.getElementById('summaryDiscountInput');
     const adjustmentInput = document.getElementById('summaryAdjustmentInput');
@@ -2536,7 +2221,7 @@ function openPoModal(po = null) {
     if (amountPaidInput) amountPaidInput.value = String(number(po.amountPaid || 0));
     form.elements.paymentStatus.value = ['Paid', 'Partially Paid', 'Pending', 'Unknown'].includes(po.paymentStatus) ? po.paymentStatus : 'Unknown';
     form.elements.poStatus.value = ['Issued', 'Billed', 'Closed', 'Unknown'].includes(po.poStatus) ? po.poStatus : 'Unknown';
-    form.elements.deliveryStatus.value = ['Unknown', 'In Transit', 'Partially Delivered', 'Delivered'].includes(po.deliveryStatus) ? po.deliveryStatus : 'Unknown';
+    form.elements.deliveryStatus.value = ['Unknown', 'Partially Delivered', 'Delivered'].includes(po.deliveryStatus) ? po.deliveryStatus : 'Unknown';
     form.elements.terms.value = po.terms || '';
     po.items.forEach(item => linesMount.appendChild(createLineItemCard(item)));
   } else {
@@ -2553,12 +2238,10 @@ function openPoModal(po = null) {
     form.elements.paymentStatus.value = 'Pending';
     form.elements.poStatus.value = 'Issued';
     form.elements.deliveryStatus.value = 'Unknown';
-    if (form.elements.edd) form.elements.edd.value = '';
     linesMount.appendChild(createLineItemCard({ quantityOrdered: 1, itemTaxPercent: 18 }));
   }
   refreshLineIndexes();
   recalcPoSummary();
-  refreshEddFieldVisibility(po);
   modal.classList.remove('hidden');
 }
 
@@ -2624,7 +2307,6 @@ function collectPoFormPayload(existingPo = null) {
   const source = cleanText(form.elements.source.value);
   const gstin = cleanText(form.elements.gstin.value);
   const deliveryDate = form.elements.deliveryDate.value;
-  const edd = form.elements.edd ? form.elements.edd.value : '';
   const { discountType, discountInputValue, adjustmentAmount } = getDiscountStateFromInputs();
   const amountPaidInput = number(document.getElementById('summaryAmountPaidInput')?.value);
   const paymentStatus = normalizePaymentStatus(form.elements.paymentStatus.value);
@@ -2663,7 +2345,6 @@ function collectPoFormPayload(existingPo = null) {
       id: base?.id || uid('manual'),
       poDate,
       deliveryDate,
-      edd,
       deliveryStatus,
       poNumber,
       reference: base?.reference || '',
@@ -2744,6 +2425,25 @@ function applyPoChanges(existingPo, payload) {
   renderAll();
 }
 
+
+async function deletePurchaseOrderFromSupabase(poNumber) {
+  if (!useSupabase || !poNumber) return;
+  const cleanPoNumber = cleanText(poNumber);
+  if (!cleanPoNumber) return;
+
+  const { error: lineError } = await supabaseClient
+    .from('po_lines')
+    .delete()
+    .eq('po_number', cleanPoNumber);
+  if (lineError) throw lineError;
+
+  const { error: poError } = await supabaseClient
+    .from('purchase_orders')
+    .delete()
+    .eq('po_number', cleanPoNumber);
+  if (poError) throw poError;
+}
+
 function deletePurchaseOrder(poKey) {
   const { po } = getDerivedAndGroupedPo(poKey);
   if (!po) return;
@@ -2757,6 +2457,13 @@ function deletePurchaseOrder(poKey) {
       state.rowOverrides[item.id] = { ...(state.rowOverrides[item.id] || {}), __deleted: true };
     }
   });
+
+  if (useSupabase) {
+    deletePurchaseOrderFromSupabase(po.poNumber).catch(error => {
+      console.error('Explicit PO delete failed', error);
+      alert(`PO removed locally, but Supabase delete failed: ${error.message || error}`);
+    });
+  }
 
   saveState();
   renderAll();
@@ -2783,7 +2490,6 @@ function openProductDetailModal(poKey) {
       <div class="detail-card"><div class="k">Balance Due</div><div class="v">${money(po.balanceDue || 0)}</div></div>
       <div class="detail-card"><div class="k">Payment</div><div class="v"><span class="badge ${badgeClass(po.paymentStatus)}">${escapeHtml(po.paymentStatus)}</span></div></div>
       <div class="detail-card"><div class="k">Delivery</div><div class="v"><span class="badge ${displayDeliveryBadgeClass(po)}">${escapeHtml(displayDeliveryStatus(po))}</span> <span class="small-text">${formatDate(po.deliveryDate)}</span></div></div>
-      ${isPoDelayed(po) ? `<div class="detail-card"><div class="k">EDD <span class="info-icon" title="Revised Estimated Delivery Date">i</span></div><div class="v">${getPoEdd(po) ? formatDate(getPoEdd(po)) : 'Not set'}</div></div>` : ''}
     </div>
 
     ${groupedItems.length ? `
@@ -3212,10 +2918,6 @@ function bindGlobalEvents() {
   document.getElementById('summaryAmountPaidInput')?.addEventListener('input', recalcPoSummary);
   document.getElementById('summaryAmountPaidInput')?.addEventListener('change', recalcPoSummary);
 
-  const poForm = document.getElementById('poForm');
-  poForm?.elements.deliveryDate?.addEventListener('change', () => refreshEddFieldVisibility());
-  poForm?.elements.deliveryStatus?.addEventListener('change', () => refreshEddFieldVisibility());
-
   document.getElementById('poForm').addEventListener('submit', event => {
     event.preventDefault();
     const existing = state.editingPoKey ? getDerivedAndGroupedPo(state.editingPoKey).po : null;
@@ -3225,7 +2927,6 @@ function bindGlobalEvents() {
 
   document.getElementById('poList').addEventListener('click', handlePoAction);
   document.getElementById('recentPOs').addEventListener('click', handlePoAction);
-  document.getElementById('leadTimeAlerts')?.addEventListener('click', handlePoAction);
   document.getElementById('detailModalContent').addEventListener('click', handlePoAction);
 
   document.getElementById('vendorForm').addEventListener('click', event => {
@@ -3298,12 +2999,6 @@ function handlePoAction(event) {
   const action = button.dataset.action;
   const poKey = button.dataset.po;
   if (!action) return;
-
-  if (action === 'toggle-lead-time-alerts') {
-    state.showAllLeadTimeAlerts = !state.showAllLeadTimeAlerts;
-    renderAll();
-    return;
-  }
 
   if (action === 'view-products') {
     openProductDetailModal(poKey);
