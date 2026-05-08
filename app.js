@@ -1240,6 +1240,7 @@ function normalizeDeliveryStatus(value) {
   if (!raw) return 'Unknown';
   if (/^\d{4}-\d{2}-\d{2}$/.test(cleanText(value))) return 'Unknown';
   if (raw.includes('PART')) return 'Partially Delivered';
+  if (raw.includes('TRANSIT') || raw.includes('SHIPPED') || raw.includes('DISPATCH') || raw.includes('ONWAY') || raw.includes('ENROUTE')) return 'In Transit';
   if (['YES', 'Y', 'DELIVERED', 'RECEIVED', 'DONE', 'COMPLETE', 'COMPLETED'].includes(raw)) return 'Delivered';
   return 'Unknown';
 }
@@ -2535,7 +2536,7 @@ function openPoModal(po = null) {
     if (amountPaidInput) amountPaidInput.value = String(number(po.amountPaid || 0));
     form.elements.paymentStatus.value = ['Paid', 'Partially Paid', 'Pending', 'Unknown'].includes(po.paymentStatus) ? po.paymentStatus : 'Unknown';
     form.elements.poStatus.value = ['Issued', 'Billed', 'Closed', 'Unknown'].includes(po.poStatus) ? po.poStatus : 'Unknown';
-    form.elements.deliveryStatus.value = ['Unknown', 'Partially Delivered', 'Delivered'].includes(po.deliveryStatus) ? po.deliveryStatus : 'Unknown';
+    form.elements.deliveryStatus.value = ['Unknown', 'In Transit', 'Partially Delivered', 'Delivered'].includes(po.deliveryStatus) ? po.deliveryStatus : 'Unknown';
     form.elements.terms.value = po.terms || '';
     po.items.forEach(item => linesMount.appendChild(createLineItemCard(item)));
   } else {
