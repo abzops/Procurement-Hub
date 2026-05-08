@@ -121,6 +121,7 @@ const state = {
   selectedMetricProduct: null,
   editingPoKey: null,
   showMetricVendorForm: false,
+  showAllLeadAlerts: false,
   filters: {
     poSearch: '',
     poVendor: 'all',
@@ -348,6 +349,7 @@ async function loadRemoteStateFromSupabase() {
     row.adjustmentAmount = Number(po?.adjustment_amount || 0);
     row.amountPaid = Number(po?.amount_paid || 0);
     row.balanceDue = po?.balance_due ?? row.balanceDue ?? null;
+    row.edd = cleanText(po?.edd || po?.revised_estimated_delivery_date || po?.revised_delivery_date || row.edd || '');
   });
 
   state.manualRows = [];
@@ -686,6 +688,7 @@ function convertZohoPoPayloadToDbPayload(payload) {
       source,
       gstin,
       delivery_date: deliveryDate || null,
+      edd: safeDate(payload.edd || payload.revised_estimated_delivery_date || payload.revised_delivery_date),
       payment_status: paymentStatus,
       po_status: poStatus,
       delivery_status: deliveryStatus,
@@ -1141,6 +1144,7 @@ function normalizeDeliveryStatus(value) {
   const raw = normalizeKey(value);
   if (!raw) return 'Unknown';
   if (/^\d{4}-\d{2}-\d{2}$/.test(cleanText(value))) return 'Unknown';
+  if (raw.includes('TRANSIT') || raw.includes('SHIPPED') || raw.includes('DISPATCH')) return 'In Transit';
   if (raw.includes('PART')) return 'Partially Delivered';
   if (['YES', 'Y', 'DELIVERED', 'RECEIVED', 'DONE', 'COMPLETE', 'COMPLETED'].includes(raw)) return 'Delivered';
   return 'Unknown';
@@ -1189,6 +1193,7 @@ function badgeClass(value) {
   if (raw.includes('PART')) return 'partial';
   if (raw === 'ISSUED') return 'issued';
   if (raw === 'BILLED') return 'billed';
+  if (raw === 'IN TRANSIT') return 'in-transit';
   if (raw === 'DELAYED') return 'delayed';
   return 'unknown';
 }
@@ -1208,6 +1213,7 @@ function materializeRow(row) {
     id: cleanText(row.id) || uid('row'),
     poDate: cleanText(row.poDate),
     deliveryDate: cleanText(row.deliveryDate),
+    edd: cleanText(row.edd || row.revisedEstimatedDeliveryDate || row.revised_estimated_delivery_date || row.revised_delivery_date),
     poNumber: cleanText(row.poNumber) || cleanText(row.id),
     vendorName: cleanText(row.vendorName) || 'Unknown Vendor',
     source: cleanText(row.source),
@@ -1381,6 +1387,7 @@ function groupedPOs(rows) {
       source: first.source || '',
       terms: first.terms || '',
       deliveryDate: summarizeDate(items, 'deliveryDate') || first.deliveryDate || '',
+      edd: summarizeDate(items, 'edd') || first.edd || '',
       paymentStatus: summarizeStatus(items, 'paymentStatus'),
       poStatus: summarizeStatus(items, 'poStatus'),
       deliveryStatus: summarizeStatus(items, 'deliveryStatus'),
@@ -1645,7 +1652,7 @@ function statusSortValue(key, value) {
     return ranks[cleanText(value).toUpperCase()] ?? ranks[raw] ?? 99;
   }
   if (key === 'deliveryStatus') {
-    const ranks = { UNKNOWN: 0, 'PARTIALLY DELIVERED': 1, DELAYED: 2, DELIVERED: 3, MIXED: 4 };
+    const ranks = { UNKNOWN: 0, 'IN TRANSIT': 1, 'PARTIALLY DELIVERED': 2, DELAYED: 3, DELIVERED: 4, MIXED: 5 };
     return ranks[cleanText(value).toUpperCase()] ?? ranks[raw] ?? 99;
   }
   return null;
@@ -1725,7 +1732,105 @@ function renderKpis({ pos, vendors, products, rows }) {
   `).join('');
 }
 
+
+function addDays(date, days) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  next.setDate(next.getDate() + Math.max(0, Number(days) || 0));
+  return next;
+}
+
+function parseLeadTimeDaysFromTerms(terms) {
+  const text = cleanText(terms).toLowerCase();
+  if (!text) return 0;
+  const range = text.match(/(?:delivery|lead\s*time|within|period)[^0-9]{0,30}(\d{1,3})\s*(?:-|to|–|—)\s*(\d{1,3})\s*(?:working\s*)?days?/i);
+  if (range) return Math.max(number(range[1]), number(range[2]));
+  const single = text.match(/(?:delivery|lead\s*time|within|period)[^0-9]{0,30}(\d{1,3})\s*(?:working\s*)?days?/i);
+  return single ? number(single[1]) : 0;
+}
+
+function getPoExpectedDate(po) {
+  const deliveryDate = parseDateOnly(po.deliveryDate);
+  if (deliveryDate) {
+    return { expectedDate: deliveryDate, basis: 'Delivery Date' };
+  }
+
+  const poDate = parseDateOnly(po.poDate);
+  const leadDays = parseLeadTimeDaysFromTerms(po.terms);
+  if (poDate && leadDays > 0) {
+    return { expectedDate: addDays(poDate, leadDays), basis: `${formatNumber(leadDays)} day lead time` };
+  }
+
+  return { expectedDate: null, basis: '' };
+}
+
+function getLeadTimeAlerts(pos) {
+  const today = todayDateOnly();
+  return (pos || [])
+    .map(po => {
+      if (!po || normalizeDeliveryStatus(po.deliveryStatus) === 'Delivered') return null;
+      const { expectedDate, basis } = getPoExpectedDate(po);
+      if (!expectedDate || expectedDate >= today) return null;
+      const daysOverdue = Math.max(1, Math.round((today - expectedDate) / 86400000));
+      return {
+        ...po,
+        expectedDate,
+        expectedDateText: expectedDate.toISOString().slice(0, 10),
+        basis,
+        daysOverdue
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.expectedDate.getTime() - a.expectedDate.getTime());
+}
+
+function renderLeadTimeNotifications(pos) {
+  const mount = document.getElementById('leadTimeAlerts');
+  if (!mount) return;
+
+  const alerts = getLeadTimeAlerts(pos);
+  if (!alerts.length) {
+    state.showAllLeadAlerts = false;
+    mount.innerHTML = '<div class="empty-state">No purchase order has crossed lead time.</div>';
+    return;
+  }
+
+  const visibleAlerts = state.showAllLeadAlerts ? alerts : alerts.slice(0, 1);
+  const hiddenCount = Math.max(0, alerts.length - 1);
+  mount.innerHTML = `
+    <div class="alert-summary">
+      <span class="badge delayed">${formatNumber(alerts.length)} alert${alerts.length === 1 ? '' : 's'}</span>
+      <span class="small-text">Newest crossed PO is shown first.</span>
+      ${hiddenCount ? `<button class="icon-drop-btn" type="button" data-action="toggle-lead-alerts" title="${state.showAllLeadAlerts ? 'Hide alerts' : 'Show all alerts'}">${state.showAllLeadAlerts ? '⌃' : '⌄'}</button>` : ''}
+    </div>
+    <div class="stack-list lead-alert-list">
+      ${visibleAlerts.map(po => `
+        <div class="lead-alert-card">
+          <div class="lead-alert-main">
+            <div>
+              <div class="lead-alert-title">${escapeHtml(po.poNumber)} · ${escapeHtml(po.vendorName)}</div>
+              <div class="meta-row">
+                <span>Expected: ${formatDate(po.expectedDateText)}</span>
+                <span>${escapeHtml(po.basis)}</span>
+                <span>${formatNumber(po.daysOverdue)} day${po.daysOverdue === 1 ? '' : 's'} overdue</span>
+                <span>${po.productCount || po.itemCount} product${(po.productCount || po.itemCount) === 1 ? '' : 's'}</span>
+                <span>${money(po.poTotal)}</span>
+              </div>
+              ${po.edd ? `<div class="edd-line"><strong>EDD</strong> <span class="info-dot" title="Revised Estimated Delivery Date">i</span> ${formatDate(po.edd)}</div>` : `<div class="edd-line muted"><strong>EDD</strong> <span class="info-dot" title="Revised Estimated Delivery Date">i</span> Not updated</div>`}
+            </div>
+            <div class="inline-actions">
+              <button class="ghost-btn small-btn" data-action="view-products" data-po="${escapeHtml(po.poKey)}">Products</button>
+              <button class="primary-btn small-btn" data-action="edit-po" data-po="${escapeHtml(po.poKey)}">Edit PO</button>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 function renderOverview({ pos, vendors }) {
+  renderLeadTimeNotifications(pos);
   const recent = sortData(pos, 'poDate-desc').slice(0, 6);
   document.getElementById('recentPOs').innerHTML = recent.length ? recent.map(po => `
     <div class="mini-card">
@@ -1836,6 +1941,7 @@ function renderPurchaseOrders({ pos }) {
         <div class="metric-label">Delivery</div>
         <div class="badge ${displayDeliveryBadgeClass(po)}">${escapeHtml(displayDeliveryStatus(po))}</div>
         <div class="small-text">${formatDate(po.deliveryDate)}</div>
+        ${isPoDelayed(po) ? `<div class="small-text edd-inline"><strong>EDD</strong> <span class="info-dot" title="Revised Estimated Delivery Date">i</span> ${po.edd ? formatDate(po.edd) : 'Not updated'}</div>` : ''}
       </div>
       <div class="action-stack">
         <button class="ghost-btn small-btn" data-action="view-products" data-po="${escapeHtml(po.poKey)}">Products</button>
@@ -2221,7 +2327,8 @@ function openPoModal(po = null) {
     if (amountPaidInput) amountPaidInput.value = String(number(po.amountPaid || 0));
     form.elements.paymentStatus.value = ['Paid', 'Partially Paid', 'Pending', 'Unknown'].includes(po.paymentStatus) ? po.paymentStatus : 'Unknown';
     form.elements.poStatus.value = ['Issued', 'Billed', 'Closed', 'Unknown'].includes(po.poStatus) ? po.poStatus : 'Unknown';
-    form.elements.deliveryStatus.value = ['Unknown', 'Partially Delivered', 'Delivered'].includes(po.deliveryStatus) ? po.deliveryStatus : 'Unknown';
+    form.elements.deliveryStatus.value = ['Unknown', 'In Transit', 'Partially Delivered', 'Delivered'].includes(po.deliveryStatus) ? po.deliveryStatus : 'Unknown';
+    if (form.elements.edd) form.elements.edd.value = po.edd || '';
     form.elements.terms.value = po.terms || '';
     po.items.forEach(item => linesMount.appendChild(createLineItemCard(item)));
   } else {
@@ -2238,6 +2345,7 @@ function openPoModal(po = null) {
     form.elements.paymentStatus.value = 'Pending';
     form.elements.poStatus.value = 'Issued';
     form.elements.deliveryStatus.value = 'Unknown';
+    if (form.elements.edd) form.elements.edd.value = '';
     linesMount.appendChild(createLineItemCard({ quantityOrdered: 1, itemTaxPercent: 18 }));
   }
   refreshLineIndexes();
@@ -2307,6 +2415,7 @@ function collectPoFormPayload(existingPo = null) {
   const source = cleanText(form.elements.source.value);
   const gstin = cleanText(form.elements.gstin.value);
   const deliveryDate = form.elements.deliveryDate.value;
+  const edd = form.elements.edd?.value || '';
   const { discountType, discountInputValue, adjustmentAmount } = getDiscountStateFromInputs();
   const amountPaidInput = number(document.getElementById('summaryAmountPaidInput')?.value);
   const paymentStatus = normalizePaymentStatus(form.elements.paymentStatus.value);
@@ -2345,6 +2454,7 @@ function collectPoFormPayload(existingPo = null) {
       id: base?.id || uid('manual'),
       poDate,
       deliveryDate,
+      edd,
       deliveryStatus,
       poNumber,
       reference: base?.reference || '',
@@ -2490,6 +2600,7 @@ function openProductDetailModal(poKey) {
       <div class="detail-card"><div class="k">Balance Due</div><div class="v">${money(po.balanceDue || 0)}</div></div>
       <div class="detail-card"><div class="k">Payment</div><div class="v"><span class="badge ${badgeClass(po.paymentStatus)}">${escapeHtml(po.paymentStatus)}</span></div></div>
       <div class="detail-card"><div class="k">Delivery</div><div class="v"><span class="badge ${displayDeliveryBadgeClass(po)}">${escapeHtml(displayDeliveryStatus(po))}</span> <span class="small-text">${formatDate(po.deliveryDate)}</span></div></div>
+      ${isPoDelayed(po) ? `<div class="detail-card"><div class="k">EDD <span class="info-dot" title="Revised Estimated Delivery Date">i</span></div><div class="v">${po.edd ? formatDate(po.edd) : 'Not updated'}</div></div>` : ''}
     </div>
 
     ${groupedItems.length ? `
@@ -2927,6 +3038,15 @@ function bindGlobalEvents() {
 
   document.getElementById('poList').addEventListener('click', handlePoAction);
   document.getElementById('recentPOs').addEventListener('click', handlePoAction);
+  document.getElementById('leadTimeAlerts')?.addEventListener('click', event => {
+    const toggle = event.target.closest('[data-action="toggle-lead-alerts"]');
+    if (toggle) {
+      state.showAllLeadAlerts = !state.showAllLeadAlerts;
+      renderAll();
+      return;
+    }
+    handlePoAction(event);
+  });
   document.getElementById('detailModalContent').addEventListener('click', handlePoAction);
 
   document.getElementById('vendorForm').addEventListener('click', event => {
