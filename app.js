@@ -138,6 +138,37 @@ const state = {
   }
 };
 
+const FOLLOWUP_STAGE_RULES = {
+  RTO: [
+    { key: 'RTO_0', threshold: 0, label: '0% PO Acknowledgement', activity: 'Obtain PO acknowledgement and delivery commitment', method: 'Email' },
+    { key: 'RTO_50', threshold: 50, label: '50% Readiness Check', activity: 'Verify order readiness and logistics arrangement', method: 'Call / Email' },
+    { key: 'RTO_75', threshold: 75, label: '75% Dispatch Schedule', activity: 'Confirm dispatch schedule and transportation details', method: 'Call + Email' },
+    { key: 'RTO_95', threshold: 95, label: '95% Next-Day Delivery Confirmation', activity: 'Confirm next-day delivery commitment', method: 'Mandatory Call + Email' },
+    { key: 'RTO_100', threshold: 100, label: '100% Delivery / ETA Check', activity: 'Confirm dispatch / delivery status and ETA', method: 'Mandatory Call + Email' }
+  ],
+  MTO: [
+    { key: 'MTO_0', threshold: 0, label: '0% PO Acknowledgement', activity: 'Obtain PO acknowledgement and production acceptance', method: 'Call + Email' },
+    { key: 'MTO_25', threshold: 25, label: '25% Manufacturing Kickoff', activity: 'Confirm raw material procurement and manufacturing kickoff', method: 'Call + Email' },
+    { key: 'MTO_50', threshold: 50, label: '50% Manufacturing Progress', activity: 'Obtain manufacturing progress update (%)', method: 'Call + Email' },
+    { key: 'MTO_75', threshold: 75, label: '75% QC / Inspection Readiness', activity: 'Verify production completion, QC, and inspection readiness', method: 'Call + Email' },
+    { key: 'MTO_90', threshold: 90, label: '90% Packing / Dispatch Readiness', activity: 'Confirm packing, dispatch readiness, and logistics planning', method: 'Call + Email' },
+    { key: 'MTO_95', threshold: 95, label: '95% Next-Day Delivery Confirmation', activity: 'Confirm next-day committed delivery', method: 'Mandatory Call + Email' },
+    { key: 'MTO_100', threshold: 100, label: '100% Dispatch / Movement / ETA', activity: 'Confirm dispatch / material movement / ETA', method: 'Mandatory Call + Email' }
+  ],
+  Unknown: [
+    { key: 'GEN_0', threshold: 0, label: '0% PO Acknowledgement', activity: 'Obtain PO acknowledgement and delivery commitment', method: 'Email' },
+    { key: 'GEN_50', threshold: 50, label: '50% Follow-up', activity: 'Verify order readiness / progress and logistics arrangement', method: 'Call / Email' },
+    { key: 'GEN_75', threshold: 75, label: '75% Dispatch Readiness', activity: 'Confirm dispatch schedule and transportation details', method: 'Call + Email' },
+    { key: 'GEN_100', threshold: 100, label: '100% Delivery / ETA Check', activity: 'Confirm dispatch / delivery status and ETA', method: 'Mandatory Call + Email' }
+  ]
+};
+
+const FOLLOWUP_DELAY_RULES = {
+  RTO: { key: 'RTO_DELAY', label: 'Delay Stage', activity: 'Ask reason for delay and revised delivery date', method: 'Mandatory Call + Email' },
+  MTO: { key: 'MTO_DELAY', label: 'Delay Stage', activity: 'Obtain delay justification and revised delivery schedule', method: 'Mandatory Call + Email' },
+  Unknown: { key: 'GEN_DELAY', label: 'Delay Stage', activity: 'Ask reason for delay and revised delivery date', method: 'Mandatory Call + Email' }
+};
+
 const snsConfig = window.SNS_CONFIG || {};
 const useSupabase = Boolean(snsConfig.useSupabase && snsConfig.supabaseUrl && snsConfig.supabaseAnonKey && window.supabase?.createClient);
 const supabaseClient = useSupabase ? window.supabase.createClient(snsConfig.supabaseUrl, snsConfig.supabaseAnonKey) : null;
@@ -431,6 +462,9 @@ async function syncStateToSupabase() {
       delivery_date: safeDate(po.deliveryDate),
       edd: safeDate(po.edd),
       material_type: normalizeMaterialType(po.materialType || 'Unknown'),
+      vendor_email: cleanText(state.vendorContacts?.[cleanText(po.vendorName)]?.email || po.vendorEmail || ''),
+      vendor_phone: cleanText(state.vendorContacts?.[cleanText(po.vendorName)]?.phone || po.vendorPhone || ''),
+      delay_reason: cleanText(po.delayReason || ''),
       payment_status: po.paymentStatus || '',
       po_status: po.poStatus || '',
       delivery_status: po.deliveryStatus || '',
@@ -494,36 +528,10 @@ async function syncStateToSupabase() {
       if (error) throw error;
     }
 
-    // delete removed metrics / lines / pos
-    const [existingMetricsRes, existingLinesRes, existingPOsRes] = await Promise.all([
-      supabaseClient.from('product_vendor_metrics').select('metric_key'),
-      supabaseClient.from('po_lines').select('line_id'),
-      supabaseClient.from('purchase_orders').select('po_number')
-    ]);
-    if (existingMetricsRes.error) throw existingMetricsRes.error;
-    if (existingLinesRes.error) throw existingLinesRes.error;
-    if (existingPOsRes.error) throw existingPOsRes.error;
-
-    const currentMetricKeys = new Set(metricsPayload.map(x => x.metric_key));
-    const removeMetricKeys = (existingMetricsRes.data || []).map(x => x.metric_key).filter(k => !currentMetricKeys.has(k));
-    if (removeMetricKeys.length) {
-      const { error } = await supabaseClient.from('product_vendor_metrics').delete().in('metric_key', removeMetricKeys);
-      if (error) throw error;
-    }
-
-    const currentLineIds = new Set(linePayload.map(x => x.line_id));
-    const removeLineIds = (existingLinesRes.data || []).map(x => x.line_id).filter(k => !currentLineIds.has(k));
-    if (removeLineIds.length) {
-      const { error } = await supabaseClient.from('po_lines').delete().in('line_id', removeLineIds);
-      if (error) throw error;
-    }
-
-    const currentPONumbers = new Set(poPayload.map(x => x.po_number));
-    const removePONumbers = (existingPOsRes.data || []).map(x => x.po_number).filter(k => !currentPONumbers.has(k));
-    if (removePONumbers.length) {
-      const { error } = await supabaseClient.from('purchase_orders').delete().in('po_number', removePONumbers);
-      if (error) throw error;
-    }
+    // IMPORTANT: normal sync is upsert-only.
+    // Do not delete existing Supabase rows just because they are missing from the current local UI state.
+    // Queue processing can refresh local state asynchronously; broad diff-delete here can erase newly queued POs.
+    // Explicit Delete PO actions handle real deletions separately.
 
     if (poPayload.length) {
       const { error } = await supabaseClient.from('purchase_orders').upsert(poPayload, { onConflict: 'po_number' });
@@ -539,6 +547,8 @@ async function syncStateToSupabase() {
       const { error } = await supabaseClient.from('product_vendor_metrics').upsert(metricsPayload, { onConflict: 'metric_key' });
       if (error) throw error;
     }
+
+    await generateFollowupTasksForPurchaseOrders(derived.pos);
   } catch (error) {
     console.error('Supabase sync failed', error);
     const message = String(error?.message || error || '');
@@ -816,6 +826,9 @@ async function upsertDbPayloadToSupabase(payload) {
     delivery_date: safeDate(po.delivery_date),
     edd: safeDate(po.edd || po.revised_estimated_delivery_date || po.revised_delivery_date),
     material_type: normalizeMaterialType(po.material_type || 'Unknown'),
+    vendor_email: cleanText(po.vendor_email || po.email || ''),
+    vendor_phone: cleanText(po.vendor_phone || po.phone || ''),
+    delay_reason: cleanText(po.delay_reason || ''),
     payment_status: normalizePaymentStatus(po.payment_status || 'Pending'),
     po_status: normalizePoStatus(po.po_status || 'Issued'),
     delivery_status: normalizeDeliveryStatus(po.delivery_status || 'Unknown'),
@@ -872,6 +885,8 @@ async function upsertDbPayloadToSupabase(payload) {
     const { error } = await supabaseClient.from('po_lines').upsert(linePayload, { onConflict: 'line_id' });
     if (error) throw error;
   }
+
+  await generateFollowupTasksForDbPayload(poPayload);
   return { vendors: vendorsPayload.length, purchaseOrders: poPayload.length, poLines: linePayload.length };
 }
 
@@ -1200,6 +1215,7 @@ function normalizeDeliveryStatus(value) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(cleanText(value))) return 'Unknown';
   if (raw.includes('TRANSIT') || raw.includes('DISPATCH') || raw.includes('SHIPP')) return 'In Transit';
   if (raw.includes('PART')) return 'Partially Delivered';
+  if (raw.includes('TRANSIT') || raw.includes('INPROGRESS') || raw.includes('INPROGRESS')) return 'In Transit';
   if (['YES', 'Y', 'DELIVERED', 'RECEIVED', 'DONE', 'COMPLETE', 'COMPLETED'].includes(raw)) return 'Delivered';
   return 'Unknown';
 }
@@ -1392,9 +1408,186 @@ function buildLeadTimeAlerts(pos) {
     });
 }
 
+function getFollowupRulesForMaterialType(materialType) {
+  return FOLLOWUP_STAGE_RULES[normalizeMaterialType(materialType)] || FOLLOWUP_STAGE_RULES.Unknown;
+}
+
+function getDelayRuleForMaterialType(materialType) {
+  return FOLLOWUP_DELAY_RULES[normalizeMaterialType(materialType)] || FOLLOWUP_DELAY_RULES.Unknown;
+}
+
+function getFollowupPriority(rule, isDelayStage = false, daysOverdue = 0) {
+  if (isDelayStage) return 'Critical';
+  const threshold = Number(rule?.threshold || 0);
+  if (daysOverdue > 0 || threshold >= 95) return 'High';
+  if (threshold >= 75) return 'High';
+  return 'Normal';
+}
+
+function buildCurrentFollowupTaskForPo(po) {
+  if (!po || normalizeDeliveryStatus(po.deliveryStatus) === 'Delivered') return null;
+
+  const poDate = parseDateOnly(po.poDate);
+  if (!poDate) return null;
+
+  const materialType = normalizeMaterialType(po.materialType || 'Unknown');
+  const target = getExpectedPoLeadTimeDate(po, poDate);
+  if (!target.expectedDate) return null;
+
+  const today = todayDateOnly();
+  const totalLeadDays = Math.max(1, Number(target.leadTimeDays || daysBetweenDates(poDate, target.expectedDate) || 1));
+  const elapsedDays = daysBetweenDates(poDate, today);
+  const progressPercent = Math.max(0, Math.min(999, Math.round((elapsedDays / totalLeadDays) * 100)));
+
+  let rule;
+  let dueDate;
+  let isDelayStage = false;
+  let daysOverdue = 0;
+
+  if (target.expectedDate < today) {
+    rule = getDelayRuleForMaterialType(materialType);
+    dueDate = today;
+    isDelayStage = true;
+    daysOverdue = daysBetweenDates(target.expectedDate, today);
+  } else {
+    const rules = getFollowupRulesForMaterialType(materialType);
+    rule = [...rules]
+      .filter(item => Number(item.threshold || 0) <= progressPercent)
+      .sort((a, b) => Number(b.threshold || 0) - Number(a.threshold || 0))[0];
+
+    if (!rule) return null;
+    dueDate = addDaysToDate(poDate, Math.round(totalLeadDays * (Number(rule.threshold || 0) / 100)));
+    if (dueDate > today) return null;
+  }
+
+  const vendorKey = cleanText(po.vendorName);
+  const contact = state.vendorContacts?.[vendorKey] || {};
+  const stage = `${materialType} ${rule.label}`;
+
+  return {
+    po_number: cleanText(po.poNumber),
+    vendor_name: vendorKey || 'Unknown Vendor',
+    vendor_email: cleanText(po.vendorEmail || contact.email || ''),
+    vendor_phone: cleanText(po.vendorPhone || contact.phone || ''),
+    material_type: materialType,
+    followup_stage: stage,
+    lead_time_percent: isDelayStage ? 100 : Math.min(100, progressPercent),
+    followup_activity: rule.activity,
+    communication_method: rule.method,
+    due_date: dateToIsoDate(dueDate),
+    status: 'Pending',
+    priority: getFollowupPriority(rule, isDelayStage, daysOverdue),
+    email_status: rule.method.toLowerCase().includes('email') ? 'Pending' : 'Not Required',
+    call_status: rule.method.toLowerCase().includes('call') ? 'Pending' : 'Not Required',
+    notes: isDelayStage
+      ? `Auto-generated delay follow-up. Expected date crossed on ${dateToIsoDate(target.expectedDate)}.`
+      : `Auto-generated ${stage} follow-up.`
+  };
+}
+
+function buildFollowupTasksForPurchaseOrders(pos = []) {
+  const tasksByKey = new Map();
+  (pos || []).forEach(po => {
+    const task = buildCurrentFollowupTaskForPo(po);
+    if (!task?.po_number || !task.followup_stage) return;
+    tasksByKey.set(`${task.po_number}__${task.followup_stage}`, task);
+  });
+  return Array.from(tasksByKey.values());
+}
+
+function dbPurchaseOrderToFollowupPo(po) {
+  return {
+    poNumber: cleanText(po.po_number),
+    poDate: cleanText(po.po_date),
+    deliveryDate: cleanText(po.delivery_date),
+    edd: cleanText(po.edd),
+    materialType: normalizeMaterialType(po.material_type || 'Unknown'),
+    vendorName: cleanText(po.vendor_name),
+    vendorEmail: cleanText(po.vendor_email || ''),
+    vendorPhone: cleanText(po.vendor_phone || ''),
+    deliveryStatus: normalizeDeliveryStatus(po.delivery_status || 'Unknown'),
+    terms: String(po.terms ?? ''),
+    poTotal: number(po.po_total),
+    productCount: Number(po.product_count || 0),
+    itemCount: Number(po.item_count || 0),
+    totalQty: Number(po.total_qty || 0),
+    items: []
+  };
+}
+
+function buildFollowupTasksFromDbPayload(poPayload = []) {
+  return buildFollowupTasksForPurchaseOrders((poPayload || []).map(dbPurchaseOrderToFollowupPo));
+}
+
+async function insertPoActivityEventsForFollowups(tasks = []) {
+  if (!useSupabase || !tasks.length) return;
+  const events = tasks.map(task => ({
+    po_number: task.po_number,
+    event_type: 'Follow-up Generated',
+    event_title: task.followup_stage,
+    event_description: task.followup_activity,
+    new_value: task.due_date,
+    actor: 'System',
+    source: 'Procurement Hub',
+    metadata: {
+      material_type: task.material_type,
+      communication_method: task.communication_method,
+      priority: task.priority
+    }
+  }));
+  const { error } = await supabaseClient.from('po_activity_events').insert(events);
+  if (error) console.warn('PO activity event insert skipped', error);
+}
+
+async function generateFollowupTasks(tasks = []) {
+  if (!useSupabase || !tasks.length) return { generated: 0, skipped: 0 };
+  const taskMap = new Map();
+  (tasks || []).forEach(task => {
+    if (!cleanText(task?.po_number) || !cleanText(task?.followup_stage)) return;
+    taskMap.set(`${cleanText(task.po_number)}__${cleanText(task.followup_stage)}`, task);
+  });
+  const uniqueTasks = Array.from(taskMap.values());
+
+  if (!uniqueTasks.length) return { generated: 0, skipped: 0 };
+
+  const poNumbers = [...new Set(uniqueTasks.map(task => task.po_number))];
+  const { data: existing, error } = await supabaseClient
+    .from('po_followups')
+    .select('po_number, followup_stage, status')
+    .in('po_number', poNumbers);
+
+  if (error) {
+    console.warn('Follow-up lookup skipped', error);
+    return { generated: 0, skipped: uniqueTasks.length };
+  }
+
+  const existingKeys = new Set((existing || []).map(row => `${cleanText(row.po_number)}__${cleanText(row.followup_stage)}`));
+  const toInsert = uniqueTasks.filter(task => !existingKeys.has(`${task.po_number}__${task.followup_stage}`));
+
+  if (!toInsert.length) return { generated: 0, skipped: uniqueTasks.length };
+
+  const { error: insertError } = await supabaseClient.from('po_followups').insert(toInsert);
+  if (insertError) {
+    console.warn('Follow-up task generation skipped', insertError);
+    return { generated: 0, skipped: uniqueTasks.length };
+  }
+
+  await insertPoActivityEventsForFollowups(toInsert);
+  return { generated: toInsert.length, skipped: uniqueTasks.length - toInsert.length };
+}
+
+async function generateFollowupTasksForPurchaseOrders(pos = []) {
+  return generateFollowupTasks(buildFollowupTasksForPurchaseOrders(pos));
+}
+
+async function generateFollowupTasksForDbPayload(poPayload = []) {
+  return generateFollowupTasks(buildFollowupTasksFromDbPayload(poPayload));
+}
+
 function badgeClass(value) {
   const raw = normalizeKey(value);
   if (raw === 'PAID' || raw === 'DELIVERED') return 'paid delivered';
+  if (raw === 'INTRANSIT') return 'issued';
   if (raw.includes('PART')) return 'partial';
   if (raw === 'ISSUED') return 'issued';
   if (raw === 'BILLED') return 'billed';
