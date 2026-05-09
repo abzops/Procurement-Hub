@@ -184,6 +184,7 @@ const queueConfig = {
 let remoteSyncTimer = null;
 let remoteSyncInFlight = false;
 let queueProcessingInFlight = false;
+let completingFollowupContext = null;
 
 function cleanConfigText(value) {
   return String(value ?? '').trim();
@@ -1849,7 +1850,7 @@ async function generateFollowupsForPOs(pos = []) {
         communication_method: row.communication_method,
         due_date: row.due_date || null,
         status: row.status,
-        priority: row.priority,
+        priority: toDbFollowupPriority(row.priority),
         email_status: row.email_status,
         call_status: row.call_status
       }));
@@ -1892,7 +1893,7 @@ function buildFollowupCards(pos = []) {
       poTotal: po.poTotal || 0,
       productCount: po.productCount || po.itemCount || 0,
       po_delivery_date: po.deliveryDate || row.po_delivery_date || row.delivery_date || '',
-      latestUpdate: row.latest_update || row.completion_note || '',
+      latestUpdate: row.latest_update || row.completion_note || row.notes || '',
       isVirtual: false
     };
   });
@@ -1915,6 +1916,17 @@ function getFollowupCardStatus(card, selectedDate) {
   return status || 'Pending';
 }
 
+
+
+function toDbFollowupPriority(value) {
+  const raw = normalizeKey(value);
+  if (raw.includes('LOW')) return 'Low';
+  if (raw.includes('HIGH')) return 'High';
+  if (raw.includes('CRITICAL')) return 'Critical';
+  // Supabase Module 1 constraint supports Low, Normal, High, Critical.
+  // UI still displays Medium based on stage, but DB stores it as Normal.
+  return 'Normal';
+}
 
 function getEffectiveFollowupPriority(card, viewStatus) {
   const statusKey = normalizeKey(card?.status || '');
@@ -2061,6 +2073,306 @@ function renderFollowups({ pos }) {
       </article>
     `;
   }).join('');
+}
+
+
+function getFollowupByIdOrPo(followupId, poKey) {
+  const derived = buildDerived();
+  const po = derived.pos.find(item => item.poKey === poKey || item.poNumber === poKey) || null;
+  const allCards = buildFollowupCards(derived.pos);
+  const card = allCards.find(item => cleanText(item.id) === cleanText(followupId))
+    || allCards.find(item => cleanText(item.poKey || item.po_number) === cleanText(poKey) || cleanText(item.po_number) === cleanText(poKey))
+    || null;
+  return { card, po };
+}
+
+async function ensureFollowupPersisted(card) {
+  if (!card) throw new Error('Follow-up card not found.');
+  if (cleanText(card.id) && !card.isVirtual) return card;
+
+  if (!useSupabase) {
+    const localRow = {
+      ...card,
+      id: cleanText(card.id) || uid('followup'),
+      isVirtual: false,
+      created_at: new Date().toISOString()
+    };
+    state.followups = [...(state.followups || []), localRow];
+    return localRow;
+  }
+
+  const matchQuery = await supabaseClient
+    .from('po_followups')
+    .select('*')
+    .eq('po_number', card.po_number)
+    .eq('followup_stage', card.followup_stage)
+    .maybeSingle();
+
+  if (matchQuery.error && matchQuery.error.code !== 'PGRST116') throw matchQuery.error;
+  if (matchQuery.data) return matchQuery.data;
+
+  const payload = {
+    po_number: card.po_number,
+    vendor_name: card.vendor_name || 'Unknown Vendor',
+    vendor_email: card.vendor_email || null,
+    vendor_phone: card.vendor_phone || null,
+    material_type: normalizeMaterialType(card.material_type || 'Unknown'),
+    followup_stage: card.followup_stage || 'Follow-up',
+    lead_time_percent: card.lead_time_percent == null ? null : Number(card.lead_time_percent),
+    followup_activity: card.followup_activity || 'Follow up with vendor',
+    communication_method: card.communication_method || 'Call / Email',
+    due_date: safeDate(card.due_date),
+    status: 'Pending',
+    priority: toDbFollowupPriority(card.priority || 'Normal'),
+    email_status: cleanText(card.email_status || 'Not Sent'),
+    call_status: cleanText(card.call_status || 'Not Required')
+  };
+
+  const { data, error } = await supabaseClient
+    .from('po_followups')
+    .insert(payload)
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  state.followups = [...(state.followups || []).filter(item => cleanText(item.id) !== cleanText(data.id)), data];
+  return data;
+}
+
+function openCompleteFollowupModal(followupId, poKey) {
+  const { card, po } = getFollowupByIdOrPo(followupId, poKey);
+  if (!card) {
+    alert('Follow-up card not found. Refresh once and try again.');
+    return;
+  }
+
+  completingFollowupContext = { followupId: cleanText(followupId), poKey, card, po };
+
+  const form = document.getElementById('completeFollowupForm');
+  if (!form) return;
+  form.reset();
+  form.elements.followupId.value = cleanText(followupId);
+  form.elements.poKey.value = cleanText(poKey || card.poKey || card.po_number);
+  form.elements.completionMethod.value = cleanText(card.communication_method || 'Call + Email').includes('Call') ? 'Call + Email' : 'Email';
+  form.elements.edd.value = safeDate(po?.edd || card.edd || '') || '';
+  form.elements.delayReason.value = cleanText(po?.delayReason || card.delay_reason || '');
+  form.elements.nextFollowupDate.value = '';
+
+  document.getElementById('completeFollowupTitle').textContent = `Complete ${card.po_number || poKey}`;
+  document.getElementById('completeFollowupSubtext').textContent = `${card.vendor_name || po?.vendorName || 'Vendor'} • ${card.followup_stage || 'Follow-up'}`;
+  document.getElementById('completeFollowupStage').textContent = card.followup_stage || 'Follow-up';
+  document.getElementById('completeFollowupActivity').textContent = card.followup_activity || 'Follow up with vendor';
+  document.getElementById('completeFollowupDue').textContent = formatDate(card.due_date);
+  document.getElementById('completeFollowupDelivery').textContent = formatDate(po?.deliveryDate || card.po_delivery_date || '');
+
+  document.getElementById('completeFollowupBackdrop').classList.remove('hidden');
+}
+
+function closeCompleteFollowupModal() {
+  document.getElementById('completeFollowupBackdrop')?.classList.add('hidden');
+  completingFollowupContext = null;
+}
+
+function applyFollowupCompletionLocally(followupRow, completion) {
+  const id = cleanText(followupRow.id);
+  const poNumber = cleanText(followupRow.po_number || completion.poNumber);
+  const updated = {
+    ...followupRow,
+    status: 'Completed',
+    completed_at: completion.completedAt,
+    completed_by: completion.doneBy,
+    call_status: completion.callStatus,
+    notes: completion.updateReceived || completion.notes || followupRow.notes || ''
+  };
+
+  state.followups = (state.followups || []).filter(item => {
+    if (id && cleanText(item.id) === id) return false;
+    return !(cleanText(item.po_number) === poNumber && cleanText(item.followup_stage) === cleanText(followupRow.followup_stage));
+  });
+  state.followups.push(updated);
+
+  const patchPoRow = row => {
+    if (!row || cleanText(row.poNumber) !== poNumber) return row;
+    if (completion.edd) row.edd = completion.edd;
+    if (completion.delayReason) row.delayReason = completion.delayReason;
+    return row;
+  };
+
+  baseRows.forEach(patchPoRow);
+  state.manualRows.forEach(patchPoRow);
+  baseRows.forEach(row => {
+    if (cleanText(row.poNumber) !== poNumber) return;
+    state.rowOverrides[row.id] = {
+      ...(state.rowOverrides[row.id] || {}),
+      ...(completion.edd ? { edd: completion.edd } : {}),
+      ...(completion.delayReason ? { delayReason: completion.delayReason } : {})
+    };
+  });
+  saveState();
+}
+
+async function insertPoActivityEvent(event) {
+  if (!useSupabase) return;
+  const basePayload = {
+    po_number: event.po_number,
+    event_type: event.event_type,
+    event_title: event.event_title,
+    event_description: event.event_description,
+    old_value: event.old_value || null,
+    new_value: event.new_value || null,
+    source: 'Procurement Hub',
+    metadata: event.metadata || {}
+  };
+
+  const withActor = { ...basePayload, actor: event.actor || '' };
+  const first = await supabaseClient.from('po_activity_events').insert(withActor);
+  if (!first.error) return;
+
+  const message = String(first.error.message || '');
+  if (!message.includes('actor')) {
+    console.warn('Activity event insert failed', first.error);
+    return;
+  }
+
+  const withActorName = { ...basePayload, actor_name: event.actor || '' };
+  const second = await supabaseClient.from('po_activity_events').insert(withActorName);
+  if (second.error) console.warn('Activity event insert failed', second.error);
+}
+
+async function completeFollowup(event) {
+  event.preventDefault();
+  const form = event.target;
+  const submitBtn = form.querySelector('button[type="submit"]');
+  const originalText = submitBtn?.textContent || 'Save Complete';
+
+  const context = completingFollowupContext || getFollowupByIdOrPo(form.elements.followupId.value, form.elements.poKey.value);
+  const card = context.card;
+  if (!card) {
+    alert('Follow-up card not found. Refresh once and try again.');
+    return;
+  }
+
+  const doneBy = cleanText(form.elements.doneBy.value);
+  const vendorContactPerson = cleanText(form.elements.vendorContactPerson.value);
+  const completionMethod = cleanText(form.elements.completionMethod.value);
+  const updateReceived = cleanText(form.elements.updateReceived.value);
+  const edd = safeDate(form.elements.edd.value);
+  const delayReason = cleanText(form.elements.delayReason.value);
+  const nextFollowupDate = safeDate(form.elements.nextFollowupDate.value);
+  const notes = cleanText(form.elements.notes.value);
+
+  if (!doneBy) {
+    alert('Enter who completed the follow-up.');
+    return;
+  }
+  if (!updateReceived) {
+    alert('Enter the update received from the vendor.');
+    return;
+  }
+
+  const completedAt = new Date().toISOString();
+  const callStatus = completionMethod.toLowerCase().includes('call') || !normalizeKey(card.call_status).includes('NOT REQUIRED')
+    ? 'Completed'
+    : (card.call_status || 'Not Required');
+
+  try {
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Saving...';
+    }
+
+    const persisted = await ensureFollowupPersisted(card);
+    const followupId = cleanText(persisted.id);
+    const poNumber = cleanText(persisted.po_number || card.po_number);
+
+    const completion = {
+      poNumber,
+      doneBy,
+      vendorContactPerson,
+      completionMethod,
+      updateReceived,
+      edd,
+      delayReason,
+      nextFollowupDate,
+      notes,
+      completedAt,
+      callStatus
+    };
+
+    if (useSupabase) {
+      const followupUpdate = {
+        status: 'Completed',
+        completed_at: completedAt,
+        completed_by: doneBy,
+        call_status: callStatus,
+        notes: updateReceived || notes || null,
+        updated_at: completedAt
+      };
+      const { error: followupError } = await supabaseClient
+        .from('po_followups')
+        .update(followupUpdate)
+        .eq('id', followupId);
+      if (followupError) throw followupError;
+
+      const logPayload = {
+        followup_id: followupId || null,
+        po_number: poNumber,
+        action_type: 'Completed',
+        update_received: updateReceived,
+        vendor_contact_person: vendorContactPerson || null,
+        done_by: doneBy,
+        communication_method: completionMethod,
+        edd: edd || null,
+        delay_reason: delayReason || null,
+        next_followup_date: nextFollowupDate || null,
+        notes: notes || null
+      };
+      const { error: logError } = await supabaseClient.from('po_followup_logs').insert(logPayload);
+      if (logError) throw logError;
+
+      if (edd || delayReason) {
+        const poPatch = {};
+        if (edd) poPatch.edd = edd;
+        if (delayReason) poPatch.delay_reason = delayReason;
+        const { error: poError } = await supabaseClient
+          .from('purchase_orders')
+          .update(poPatch)
+          .eq('po_number', poNumber);
+        if (poError) throw poError;
+      }
+
+      await insertPoActivityEvent({
+        po_number: poNumber,
+        event_type: 'followup_completed',
+        event_title: 'Follow-up Completed',
+        event_description: `${persisted.followup_stage || card.followup_stage || 'Follow-up'} completed by ${doneBy}. ${updateReceived}`,
+        actor: doneBy,
+        metadata: {
+          followup_id: followupId,
+          followup_stage: persisted.followup_stage || card.followup_stage,
+          vendor_contact_person: vendorContactPerson,
+          communication_method: completionMethod,
+          edd,
+          delay_reason: delayReason,
+          next_followup_date: nextFollowupDate
+        }
+      });
+    }
+
+    applyFollowupCompletionLocally({ ...persisted, ...card }, completion);
+    if (useSupabase) await loadRemoteStateFromSupabase();
+    closeCompleteFollowupModal();
+    renderAll();
+    alert('Follow-up completed and saved.');
+  } catch (error) {
+    console.error('Complete follow-up failed', error);
+    alert(`Complete follow-up failed: ${error.message || error}`);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalText;
+    }
+  }
 }
 
 function setSelectOptions(id, options, selectedValue, placeholderLabel = 'All') {
@@ -3254,6 +3566,12 @@ function bindGlobalEvents() {
   document.getElementById('detailModalBackdrop').addEventListener('click', event => {
     if (event.target.id === 'detailModalBackdrop') closeDetailModal();
   });
+  document.getElementById('closeCompleteFollowupModalBtn')?.addEventListener('click', closeCompleteFollowupModal);
+  document.getElementById('cancelCompleteFollowupBtn')?.addEventListener('click', closeCompleteFollowupModal);
+  document.getElementById('completeFollowupBackdrop')?.addEventListener('click', event => {
+    if (event.target.id === 'completeFollowupBackdrop') closeCompleteFollowupModal();
+  });
+  document.getElementById('completeFollowupForm')?.addEventListener('submit', completeFollowup);
 
   document.getElementById('addLineBtn').addEventListener('click', () => {
     document.getElementById('poLineItems').appendChild(createLineItemCard({ quantityOrdered: 1, itemTaxPercent: 18 }));
@@ -3388,7 +3706,7 @@ function handlePoAction(event) {
     return;
   }
   if (action === 'complete-followup') {
-    alert('Complete Follow-up will be enabled in Module 5.');
+    openCompleteFollowupModal(button.dataset.followup || '', poKey);
     return;
   }
   if (action === 'send-followup-mail') {
