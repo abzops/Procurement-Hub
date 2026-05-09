@@ -2433,6 +2433,7 @@ function renderOverview({ pos, vendors }) {
       </div>
       <div class="inline-actions">
         <button class="text-link" data-action="view-products" data-po="${escapeHtml(po.poKey)}">${po.itemCount} Products</button>
+        <button class="ghost-btn small-btn" data-action="status-timeline" data-po="${escapeHtml(po.poKey)}">Status</button>
         <button class="ghost-btn small-btn" data-action="edit-po" data-po="${escapeHtml(po.poKey)}">Edit PO</button>
       </div>
     </div>
@@ -2470,6 +2471,193 @@ function renderStatusMix(pos, mountId, field) {
     </div>
   `).join('') || '<div class="empty-state">No data.</div>';
   document.getElementById(mountId).innerHTML = html;
+}
+
+
+function getPoByKeyOrNumber(poKey) {
+  const derived = buildDerived();
+  return derived.pos.find(po => po.poKey === poKey || po.poNumber === poKey) || null;
+}
+
+function normalizeTimelineDate(value) {
+  if (!value) return null;
+  const direct = new Date(value);
+  if (!Number.isNaN(direct.getTime())) return direct;
+  const parsed = parseDateOnly(value);
+  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
+}
+
+function timelineDateLabel(value) {
+  const date = normalizeTimelineDate(value);
+  if (!date) return 'Date not available';
+  const hasTime = String(value || '').includes('T');
+  const dateText = formatDate(dateToIso(date));
+  if (!hasTime) return dateText;
+  return `${dateText} • ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function getTimelineIcon(type = '') {
+  const key = normalizeKey(type);
+  if (key.includes('COMPLETE')) return '✓';
+  if (key.includes('EMAIL')) return '✉';
+  if (key.includes('CALL')) return '☎';
+  if (key.includes('EDD') || key.includes('DELIVERY')) return '↗';
+  if (key.includes('PAYMENT')) return '₹';
+  if (key.includes('QUEUE') || key.includes('SYNC')) return '↻';
+  if (key.includes('FOLLOWUP') || key.includes('FOLLOW-UP')) return '!';
+  if (key.includes('CREATE')) return '+';
+  return '•';
+}
+
+function buildPoStatusTimeline(po) {
+  if (!po) return [];
+  const poNumber = cleanText(po.poNumber);
+  const events = [];
+
+  const addEvent = event => {
+    if (!event || !event.title) return;
+    events.push({
+      date: event.date || event.created_at || event.createdAt || po.poDate || '',
+      type: event.type || event.event_type || 'status',
+      title: event.title || event.event_title,
+      description: event.description || event.event_description || '',
+      actor: event.actor || event.actor_name || '',
+      source: event.source || 'Procurement Hub',
+      oldValue: event.oldValue || event.old_value || '',
+      newValue: event.newValue || event.new_value || '',
+      metadata: event.metadata || {}
+    });
+  };
+
+  addEvent({
+    date: po.poDate,
+    type: 'po_created',
+    title: 'PO Created',
+    description: `${po.vendorName || 'Vendor'} • ${money(po.poTotal || 0)} • ${po.productCount || po.itemCount || 0} product${(po.productCount || po.itemCount || 0) === 1 ? '' : 's'}`,
+    source: 'Purchase Orders'
+  });
+
+  (state.activityEvents || [])
+    .filter(event => cleanText(event.po_number) === poNumber)
+    .forEach(event => addEvent({
+      date: event.created_at,
+      type: event.event_type,
+      title: event.event_title,
+      description: event.event_description,
+      actor: event.actor || event.actor_name,
+      source: event.source,
+      oldValue: event.old_value,
+      newValue: event.new_value,
+      metadata: event.metadata
+    }));
+
+  (state.followups || [])
+    .filter(row => cleanText(row.po_number) === poNumber && !isAcknowledgementFollowup(row))
+    .forEach(row => {
+      const status = cleanText(row.status || 'Pending');
+      const isCompleted = normalizeKey(status).includes('COMPLETE');
+      addEvent({
+        date: isCompleted ? (row.completed_at || row.updated_at || row.created_at) : (row.due_date || row.created_at),
+        type: isCompleted ? 'followup_completed' : 'followup_generated',
+        title: isCompleted ? 'Follow-up Completed' : 'Follow-up Generated',
+        description: `${row.followup_stage || 'Follow-up'}: ${row.followup_activity || 'Vendor follow-up'}${row.completed_by ? ` • Done by ${row.completed_by}` : ''}`,
+        actor: row.completed_by || '',
+        source: 'Follow-ups',
+        metadata: { status, email_status: row.email_status, call_status: row.call_status }
+      });
+    });
+
+  if (po.edd) {
+    addEvent({
+      date: po.edd,
+      type: 'edd_updated',
+      title: 'EDD Available',
+      description: `Revised Estimated Delivery Date set to ${formatDate(po.edd)}${po.delayReason ? ` • Reason: ${po.delayReason}` : ''}`,
+      source: 'Purchase Orders'
+    });
+  }
+
+  addEvent({
+    date: po.deliveryDate || po.poDate,
+    type: 'delivery_status',
+    title: 'Current Delivery Status',
+    description: `${displayDeliveryStatus(po)}${po.deliveryDate ? ` • Delivery date: ${formatDate(po.deliveryDate)}` : ''}`,
+    source: 'Purchase Orders'
+  });
+
+  addEvent({
+    date: po.poDate,
+    type: 'payment_status',
+    title: 'Current Payment Status',
+    description: `${po.paymentStatus || 'Pending'} • Paid: ${money(po.amountPaid || 0)} • Balance: ${money(po.balanceDue || 0)}`,
+    source: 'Purchase Orders'
+  });
+
+  const seen = new Set();
+  return events
+    .filter(event => {
+      const key = [event.type, event.title, event.description, event.date].map(cleanText).join('|');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => {
+      const ad = normalizeTimelineDate(a.date)?.getTime() || 0;
+      const bd = normalizeTimelineDate(b.date)?.getTime() || 0;
+      return ad - bd;
+    });
+}
+
+function openPoStatusTimeline(poKey) {
+  const po = getPoByKeyOrNumber(poKey);
+  if (!po) {
+    alert('PO not found. Refresh once and try again.');
+    return;
+  }
+
+  const events = buildPoStatusTimeline(po);
+  const title = document.getElementById('statusTimelineTitle');
+  const subtext = document.getElementById('statusTimelineSubtext');
+  const summary = document.getElementById('statusTimelineSummary');
+  const body = document.getElementById('statusTimelineContent');
+  if (!title || !subtext || !summary || !body) return;
+
+  title.textContent = `${po.poNumber} Status Timeline`;
+  subtext.textContent = `${po.vendorName || 'Vendor'} • ${po.materialType || 'Unknown'} • ${money(po.poTotal || 0)}`;
+  summary.innerHTML = `
+    <span class="timeline-summary-chip"><strong>${escapeHtml(displayDeliveryStatus(po))}</strong><small>Delivery</small></span>
+    <span class="timeline-summary-chip"><strong>${escapeHtml(po.paymentStatus || 'Pending')}</strong><small>Payment</small></span>
+    <span class="timeline-summary-chip"><strong>${escapeHtml(po.poStatus || 'Issued')}</strong><small>PO Status</small></span>
+    <span class="timeline-summary-chip"><strong>${events.length}</strong><small>Events</small></span>
+  `;
+
+  body.innerHTML = events.length ? `
+    <div class="status-timeline-list">
+      ${events.map(event => `
+        <div class="timeline-item timeline-${escapeHtml(normalizeKey(event.type).toLowerCase().replace(/[^a-z0-9]+/g, '-'))}">
+          <div class="timeline-marker">${escapeHtml(getTimelineIcon(event.type))}</div>
+          <div class="timeline-card">
+            <div class="timeline-card-head">
+              <div>
+                <h4>${escapeHtml(event.title)}</h4>
+                <p>${escapeHtml(timelineDateLabel(event.date))}</p>
+              </div>
+              <span>${escapeHtml(event.source || 'Procurement Hub')}</span>
+            </div>
+            ${event.description ? `<div class="timeline-desc">${escapeHtml(event.description)}</div>` : ''}
+            ${(event.oldValue || event.newValue) ? `<div class="timeline-change"><span>Old: ${escapeHtml(event.oldValue || '—')}</span><span>New: ${escapeHtml(event.newValue || '—')}</span></div>` : ''}
+            ${event.actor ? `<div class="timeline-actor">By ${escapeHtml(event.actor)}</div>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  ` : '<div class="empty-state">No timeline events found for this PO.</div>';
+
+  document.getElementById('statusTimelineBackdrop')?.classList.remove('hidden');
+}
+
+function closePoStatusTimeline() {
+  document.getElementById('statusTimelineBackdrop')?.classList.add('hidden');
 }
 
 function renderPurchaseOrders({ pos }) {
@@ -2533,6 +2721,7 @@ function renderPurchaseOrders({ pos }) {
       </div>
       <div class="action-stack">
         <button class="ghost-btn small-btn" data-action="view-products" data-po="${escapeHtml(po.poKey)}">Products</button>
+        <button class="ghost-btn small-btn status-btn" data-action="status-timeline" data-po="${escapeHtml(po.poKey)}">Status</button>
         <button class="primary-btn small-btn" data-action="edit-po" data-po="${escapeHtml(po.poKey)}">Edit PO</button>
         <button class="danger-btn small-btn" data-action="delete-po" data-po="${escapeHtml(po.poKey)}">Delete</button>
       </div>
@@ -3566,6 +3755,10 @@ function bindGlobalEvents() {
   document.getElementById('detailModalBackdrop').addEventListener('click', event => {
     if (event.target.id === 'detailModalBackdrop') closeDetailModal();
   });
+  document.getElementById('closeStatusTimelineModalBtn')?.addEventListener('click', closePoStatusTimeline);
+  document.getElementById('statusTimelineBackdrop')?.addEventListener('click', event => {
+    if (event.target.id === 'statusTimelineBackdrop') closePoStatusTimeline();
+  });
   document.getElementById('closeCompleteFollowupModalBtn')?.addEventListener('click', closeCompleteFollowupModal);
   document.getElementById('cancelCompleteFollowupBtn')?.addEventListener('click', closeCompleteFollowupModal);
   document.getElementById('completeFollowupBackdrop')?.addEventListener('click', event => {
@@ -3703,6 +3896,10 @@ function handlePoAction(event) {
   }
   if (action === 'delete-po') {
     deletePurchaseOrder(poKey);
+    return;
+  }
+  if (action === 'status-timeline') {
+    openPoStatusTimeline(poKey);
     return;
   }
   if (action === 'complete-followup') {
