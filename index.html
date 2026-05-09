@@ -51,6 +51,7 @@
       <button class="tab" data-tab="products">Products</button>
       <button class="tab" data-tab="vendors">Vendors</button>
       <button class="tab" data-tab="vendor-metrics">Vendor Metrics</button>
+      <button class="tab" data-tab="follow-ups">Follow-ups</button>
     </nav>
 
     <main>
@@ -218,6 +219,24 @@
             <div id="metricEditor"></div>
           </article>
         </div>
+      </section>
+
+      <section class="tab-panel" id="follow-ups">
+        <article class="panel followups-panel">
+          <div class="panel-header wrap">
+            <div>
+              <h2>Follow-ups</h2>
+              <p class="section-copy">One card per PO. Due and overdue follow-ups are highlighted in red.</p>
+            </div>
+            <div class="toolbar">
+              <input class="control-input" id="followupDateFilter" type="date" />
+              <select class="control-input" id="followupMaterialFilter"></select>
+              <select class="control-input" id="followupStatusFilter"></select>
+            </div>
+          </div>
+          <div id="followupSummary" class="followup-summary"></div>
+          <div id="followupCardList" class="followup-card-list"></div>
+        </article>
       </section>
     </main>
   </div>

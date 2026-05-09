@@ -654,3 +654,134 @@ label span{font-size:12px;color:var(--muted)}
   border-color:rgba(255,209,102,.36);
   background:rgba(255,209,102,.08);
 }
+
+
+/* Module 4: Follow-ups tab */
+.followups-panel{min-height:520px}
+.followup-summary{display:flex;flex-wrap:wrap;gap:10px;margin:4px 0 16px}
+.followup-stat{display:inline-flex;align-items:center;gap:6px;padding:8px 11px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:var(--muted);font-size:12px;font-weight:700}
+.followup-stat strong{color:var(--text)}
+.followup-stat.danger{border-color:rgba(255,102,102,.32);background:rgba(255,102,102,.08);color:#ffadad}
+.followup-stat.good{border-color:rgba(96,211,148,.28);background:rgba(96,211,148,.07);color:#9ee8bf}
+.followup-card-list{display:grid;gap:14px}
+.followup-card{position:relative;overflow:hidden;border:1px solid rgba(255,255,255,.08);border-radius:22px;padding:18px;background:linear-gradient(90deg, rgba(245,196,0,.05), rgba(255,255,255,.015));display:grid;gap:14px;box-shadow:var(--shadow)}
+.followup-card.followup-due{border-color:rgba(255,102,102,.34);background:linear-gradient(90deg, rgba(255,74,74,.15), rgba(245,196,0,.05), rgba(255,255,255,.015))}
+.followup-card.followup-completed{border-color:rgba(96,211,148,.28);background:linear-gradient(90deg, rgba(96,211,148,.1), rgba(255,255,255,.015))}
+.followup-card.followup-email-sent{border-color:rgba(140,201,255,.28);background:linear-gradient(90deg, rgba(140,201,255,.09), rgba(255,255,255,.015))}
+.followup-card-main{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.followup-topline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.followup-po{font-size:22px;font-weight:800;letter-spacing:-.02em;color:#fff}
+.followup-card h3{margin:0;font-size:18px;line-height:1.25}
+.followup-status-pill{display:inline-flex;align-items:center;padding:7px 10px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#d9d9d9}
+.followup-status-pill.danger{background:rgba(255,102,102,.12);border-color:rgba(255,102,102,.34);color:#ff9b9b}
+.followup-due-box{min-width:150px;text-align:right;padding:12px 14px;border-radius:16px;background:rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.08)}
+.followup-due-box span,.followup-action-copy span,.followup-meta-grid span,.followup-latest span{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.followup-due-box strong{font-size:16px;color:var(--accent-2)}
+.followup-due-box small{display:block;margin-top:6px;color:var(--muted);font-size:12px;letter-spacing:0;text-transform:none}
+.followup-action-copy{padding:13px 14px;border-radius:16px;background:rgba(0,0,0,.16);border:1px solid rgba(255,255,255,.06)}
+.followup-action-copy strong{display:block;line-height:1.45;color:#fff}
+.followup-meta-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.followup-meta-grid div{padding:12px;border-radius:15px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06)}
+.followup-meta-grid strong{font-size:13px;line-height:1.35}
+.followup-latest{padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05)}
+.followup-latest p{margin:0;color:#d8d8d8;line-height:1.5;font-size:13px}
+.followup-actions{justify-content:flex-end}
+@media (max-width: 900px){
+  .followup-meta-grid{grid-template-columns:1fr 1fr}
+  .followup-due-box{text-align:left;min-width:0;width:100%}
+  .followup-actions{justify-content:flex-start}
+}
+@media (max-width: 620px){.followup-meta-grid{grid-template-columns:1fr}}
+
+/* Module 4 fix: material badges and follow-up visibility */
+.material-type-badge{display:inline-flex;align-items:center;width:max-content;margin-top:8px;padding:6px 10px;border-radius:999px;border:1px solid rgba(245,196,0,.35);background:rgba(245,196,0,.08);color:var(--accent-2);font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
+.followup-status-pill{white-space:nowrap}
+
+
+/* Module 4 priority color update
+   User color codes: High = #ff0000, Medium = #ffff00, Low = #00ff00, Incomplete = #c9c9c9 */
+.followup-card{
+  --priority-color:#ffff00;
+  padding-top:24px;
+}
+.followup-card::before{
+  content:"";
+  position:absolute;
+  top:0;
+  left:0;
+  right:0;
+  height:8px;
+  background:var(--priority-color);
+  box-shadow:0 0 18px color-mix(in srgb, var(--priority-color) 35%, transparent);
+}
+.followup-card.priority-high{--priority-color:#ff0000;border-color:rgba(255,0,0,.70)}
+.followup-card.priority-medium{--priority-color:#ffff00;border-color:rgba(255,255,0,.58)}
+.followup-card.priority-low{--priority-color:#00ff00;border-color:rgba(0,255,0,.55)}
+.followup-card.priority-incomplete{--priority-color:#c9c9c9;border-color:rgba(201,201,201,.58)}
+.priority-chip{
+  display:inline-flex;
+  align-items:center;
+  padding:7px 10px;
+  border-radius:999px;
+  background:var(--priority-color);
+  color:#000;
+  border:1px solid rgba(255,255,255,.22);
+  font-size:11px;
+  font-weight:900;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+.priority-cell{
+  border-color:color-mix(in srgb, var(--priority-color) 52%, transparent) !important;
+  background:linear-gradient(90deg, color-mix(in srgb, var(--priority-color) 18%, transparent), rgba(255,255,255,.03)) !important;
+}
+.priority-cell strong{color:var(--priority-color)}
+.priority-cell.priority-medium strong{color:#ffff00}
+.priority-cell.priority-low strong{color:#00ff00}
+.priority-cell.priority-high strong{color:#ff4d4d}
+.priority-cell.priority-incomplete strong{color:#c9c9c9}
+
+/* Module 4 priority background fix
+   Priority color now controls card background and glow.
+   Follow-up overdue remains a status pill only; it should not force every overdue card to red. */
+.followup-card.priority-high,
+.followup-card.priority-high.followup-due,
+.followup-card.priority-high.followup-email-sent,
+.followup-card.priority-high.followup-completed{
+  background:
+    linear-gradient(90deg, rgba(255,0,0,.16), rgba(255,255,255,.018)) !important;
+  border-color:rgba(255,0,0,.72) !important;
+  box-shadow:0 0 0 1px rgba(255,0,0,.18), 0 18px 46px rgba(255,0,0,.14), var(--shadow);
+}
+.followup-card.priority-medium,
+.followup-card.priority-medium.followup-due,
+.followup-card.priority-medium.followup-email-sent,
+.followup-card.priority-medium.followup-completed{
+  background:
+    linear-gradient(90deg, rgba(255,255,0,.13), rgba(255,255,255,.018)) !important;
+  border-color:rgba(255,255,0,.58) !important;
+  box-shadow:0 0 0 1px rgba(255,255,0,.14), 0 18px 46px rgba(255,255,0,.09), var(--shadow);
+}
+.followup-card.priority-low,
+.followup-card.priority-low.followup-due,
+.followup-card.priority-low.followup-email-sent,
+.followup-card.priority-low.followup-completed{
+  background:
+    linear-gradient(90deg, rgba(0,255,0,.10), rgba(255,255,255,.018)) !important;
+  border-color:rgba(0,255,0,.52) !important;
+  box-shadow:0 0 0 1px rgba(0,255,0,.13), 0 18px 46px rgba(0,255,0,.08), var(--shadow);
+}
+.followup-card.priority-incomplete,
+.followup-card.priority-incomplete.followup-due,
+.followup-card.priority-incomplete.followup-email-sent,
+.followup-card.priority-incomplete.followup-completed{
+  background:
+    linear-gradient(90deg, rgba(201,201,201,.12), rgba(255,255,255,.018)) !important;
+  border-color:rgba(201,201,201,.58) !important;
+  box-shadow:0 0 0 1px rgba(201,201,201,.12), 0 18px 46px rgba(201,201,201,.07), var(--shadow);
+}
+.followup-card .followup-status-pill.danger{
+  background:rgba(255,102,102,.12);
+  border-color:rgba(255,102,102,.34);
+  color:#ff9b9b;
+}
