@@ -383,6 +383,91 @@
     </div>
   </div>
 
+
+  <div class="modal-backdrop hidden" id="completeFollowupBackdrop">
+    <div class="modal-shell modal-medium">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">FOLLOW-UP COMPLETION</p>
+          <h3 id="completeFollowupTitle">Complete Follow-up</h3>
+          <p class="section-copy" id="completeFollowupSubtext">Save the vendor update received after call or email.</p>
+        </div>
+        <button class="icon-btn" id="closeCompleteFollowupModalBtn" type="button" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="followup-complete-context">
+        <div>
+          <span>Stage</span>
+          <strong id="completeFollowupStage">—</strong>
+        </div>
+        <div>
+          <span>Required Action</span>
+          <strong id="completeFollowupActivity">—</strong>
+        </div>
+        <div>
+          <span>Follow-up Due</span>
+          <strong id="completeFollowupDue">—</strong>
+        </div>
+        <div>
+          <span>Delivery</span>
+          <strong id="completeFollowupDelivery">—</strong>
+        </div>
+      </div>
+
+      <form id="completeFollowupForm" class="modal-form complete-followup-form">
+        <input type="hidden" name="followupId" />
+        <input type="hidden" name="poKey" />
+
+        <div class="form-grid two-col">
+          <label>
+            <span>Follow-up done by *</span>
+            <input name="doneBy" type="text" placeholder="e.g. Joseph" required />
+          </label>
+          <label>
+            <span>Vendor contact person</span>
+            <input name="vendorContactPerson" type="text" placeholder="e.g. Mr. Rahul" />
+          </label>
+          <label>
+            <span>Communication method</span>
+            <select name="completionMethod">
+              <option value="Call">Call</option>
+              <option value="Email">Email</option>
+              <option value="Call + Email">Call + Email</option>
+              <option value="WhatsApp">WhatsApp</option>
+              <option value="Other">Other</option>
+            </select>
+          </label>
+          <label>
+            <span>EDD, if revised</span>
+            <input name="edd" type="date" />
+          </label>
+          <label>
+            <span>Delay reason, if any</span>
+            <input name="delayReason" type="text" placeholder="e.g. transport delay" />
+          </label>
+          <label>
+            <span>Next follow-up date</span>
+            <input name="nextFollowupDate" type="date" />
+          </label>
+        </div>
+
+        <label>
+          <span>Update received *</span>
+          <textarea name="updateReceived" rows="4" placeholder="Write the vendor update received after call/email" required></textarea>
+        </label>
+        <label>
+          <span>Internal notes</span>
+          <textarea name="notes" rows="3" placeholder="Optional internal note for procurement team"></textarea>
+        </label>
+
+        <div class="form-actions">
+          <button type="button" class="ghost-btn" id="cancelCompleteFollowupBtn">Cancel</button>
+          <button type="submit" class="primary-btn">Save Complete</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div class="modal-backdrop hidden" id="detailModalBackdrop">
     <div class="modal-shell modal-medium">
       <div class="modal-header">
