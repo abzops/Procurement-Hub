@@ -55,16 +55,6 @@
 
     <main>
       <section class="tab-panel active" id="overview">
-        <article class="panel lead-time-panel">
-          <div class="panel-header">
-            <div>
-              <h2>Lead Time Notifications</h2>
-              <p class="section-copy">Purchase orders that crossed expected delivery / lead time and are not delivered.</p>
-            </div>
-          </div>
-          <div id="leadTimeAlerts" class="stack-list"></div>
-        </article>
-
         <div class="overview-grid">
           <article class="panel">
             <div class="panel-header">
@@ -266,11 +256,19 @@
             <input class="control-input" type="text" name="gstin" placeholder="GSTIN" />
           </label>
           <label class="field">
+            <span>Material Type</span>
+            <select class="control-input" name="materialType">
+              <option>Unknown</option>
+              <option>RTO</option>
+              <option>MTO</option>
+            </select>
+          </label>
+          <label class="field">
             <span>Delivery Date</span>
             <input class="control-input" type="date" name="deliveryDate" />
           </label>
-          <label class="field">
-            <span>EDD <span class="info-dot" title="Revised Estimated Delivery Date">i</span></span>
+          <label class="field hidden" id="eddField">
+            <span class="field-label-inline">EDD <span class="info-icon" title="Revised Estimated Delivery Date">i</span></span>
             <input class="control-input" type="date" name="edd" />
           </label>
           <label class="field">
