@@ -280,8 +280,10 @@ async function loadRemoteStateFromSupabase() {
   }
 
   const vendors = vendorsRes.data || [];
+  const purchaseOrders = poRes.data || [];
   const lines = linesRes.data || [];
   const metrics = metricsRes.data || [];
+  const poMap = new Map(purchaseOrders.map(po => [po.po_number, po]));
 
   vendorSeeds = vendors
     .filter(v => !v.is_deleted)
@@ -299,12 +301,15 @@ async function loadRemoteStateFromSupabase() {
       notes: v.notes || ''
     }));
 
-  baseRows = lines.map(line => ({
+  baseRows = lines.map(line => {
+    const po = poMap.get(line.po_number) || {};
+    return {
     id: line.line_id,
     poDate: line.po_date || '',
     deliveryDate: line.delivery_date || '',
-    edd: line.edd || line.revised_estimated_delivery_date || line.revised_delivery_date || '',
+    edd: line.edd || line.revised_estimated_delivery_date || line.revised_delivery_date || po.edd || po.revised_estimated_delivery_date || po.revised_delivery_date || '',
     deliveryStatus: line.delivery_status || '',
+    materialType: normalizeMaterialType(po.material_type || 'Unknown'),
     poNumber: line.po_number,
     reference: '',
     poStatus: line.po_status || '',
@@ -331,10 +336,10 @@ async function loadRemoteStateFromSupabase() {
     adjustmentAmount: 0,
     manual: Boolean(line.manual),
     lineType: line.line_type || 'product'
-  }));
+    };
+  });
 
   // set po total on first line of each PO so existing grouping logic can keep using it
-  const poMap = new Map((poRes.data || []).map(po => [po.po_number, po]));
   const firstIndexByPo = new Map();
   baseRows.forEach((row, idx) => {
     if (!firstIndexByPo.has(row.poNumber)) firstIndexByPo.set(row.poNumber, idx);
@@ -350,6 +355,7 @@ async function loadRemoteStateFromSupabase() {
     row.adjustmentAmount = Number(po?.adjustment_amount || 0);
     row.amountPaid = Number(po?.amount_paid || 0);
     row.balanceDue = po?.balance_due ?? row.balanceDue ?? null;
+    row.materialType = normalizeMaterialType(po?.material_type || row.materialType || 'Unknown');
   });
 
   state.manualRows = [];
@@ -423,6 +429,8 @@ async function syncStateToSupabase() {
       source: po.source || '',
       gstin: po.gstin || '',
       delivery_date: safeDate(po.deliveryDate),
+      edd: safeDate(po.edd),
+      material_type: normalizeMaterialType(po.materialType || 'Unknown'),
       payment_status: po.paymentStatus || '',
       po_status: po.poStatus || '',
       delivery_status: po.deliveryStatus || '',
@@ -654,6 +662,7 @@ function convertZohoPoPayloadToDbPayload(payload) {
   const paymentStatus = normalizePaymentStatus(payload.payment_status || payload.payment_terms_label || 'Pending');
   const poStatus = normalizePoStatus(payload.status || payload.po_status || 'Issued');
   const deliveryStatus = normalizeDeliveryStatus(payload.delivery_status || payload.received_status || payload.received_status_formatted || 'Unknown');
+  const materialType = normalizeMaterialType(payload.material_type || payload.material_category || payload.order_type || 'Unknown');
   const discountAmount = roundMoney(payload.discount_total ?? payload.discount_amount ?? 0);
   const discountInputValue = roundMoney(payload.discount_total ?? payload.discount_amount ?? 0);
   const adjustmentAmount = roundMoney(payload.adjustment ?? 0);
@@ -678,6 +687,7 @@ function convertZohoPoPayloadToDbPayload(payload) {
       po_date: poDate,
       delivery_date: deliveryDate || null,
       edd: edd || null,
+      material_type: materialType,
       payment_status: paymentStatus,
       po_status: poStatus,
       delivery_status: deliveryStatus,
@@ -714,6 +724,8 @@ function convertZohoPoPayloadToDbPayload(payload) {
       source,
       gstin,
       delivery_date: deliveryDate || null,
+      edd: edd || null,
+      material_type: materialType,
       payment_status: paymentStatus,
       po_status: poStatus,
       delivery_status: deliveryStatus,
@@ -802,6 +814,8 @@ async function upsertDbPayloadToSupabase(payload) {
     source: cleanText(po.source),
     gstin: cleanText(po.gstin),
     delivery_date: safeDate(po.delivery_date),
+    edd: safeDate(po.edd || po.revised_estimated_delivery_date || po.revised_delivery_date),
+    material_type: normalizeMaterialType(po.material_type || 'Unknown'),
     payment_status: normalizePaymentStatus(po.payment_status || 'Pending'),
     po_status: normalizePoStatus(po.po_status || 'Issued'),
     delivery_status: normalizeDeliveryStatus(po.delivery_status || 'Unknown'),
@@ -996,6 +1010,7 @@ function convertDbImportPayloadToLocalRows(payload) {
       id: rowId,
       poDate: cleanText(po.po_date || line.po_date),
       deliveryDate: cleanText(po.delivery_date || line.delivery_date),
+      materialType: normalizeMaterialType(po.material_type || line.material_type || 'Unknown'),
       poNumber,
       vendorName: cleanText(po.vendor_name || line.vendor_name),
       source: cleanText(line.source || po.source),
@@ -1163,10 +1178,27 @@ function normalizePoStatus(value) {
   return cleanText(value) || 'Unknown';
 }
 
+function normalizeMaterialType(value) {
+  const raw = normalizeKey(value);
+  if (!raw) return 'Unknown';
+  if (raw === 'RTO' || raw.includes('READY') || raw.includes('READYTOORDER') || raw.includes('READYSTOCK')) return 'RTO';
+  if (raw === 'MTO' || raw.includes('MAKE') || raw.includes('MADE') || raw.includes('MANUFACTUR')) return 'MTO';
+  if (['UNKNOWN', 'NA', 'N/A', 'NONE'].includes(raw)) return 'Unknown';
+  return cleanText(value).toUpperCase() === 'RTO' || cleanText(value).toUpperCase() === 'MTO' ? cleanText(value).toUpperCase() : 'Unknown';
+}
+
+function materialTypeBadgeClass(value) {
+  const type = normalizeMaterialType(value);
+  if (type === 'RTO') return 'material-rto';
+  if (type === 'MTO') return 'material-mto';
+  return 'unknown';
+}
+
 function normalizeDeliveryStatus(value) {
   const raw = normalizeKey(value);
   if (!raw) return 'Unknown';
   if (/^\d{4}-\d{2}-\d{2}$/.test(cleanText(value))) return 'Unknown';
+  if (raw.includes('TRANSIT') || raw.includes('DISPATCH') || raw.includes('SHIPP')) return 'In Transit';
   if (raw.includes('PART')) return 'Partially Delivered';
   if (['YES', 'Y', 'DELIVERED', 'RECEIVED', 'DONE', 'COMPLETE', 'COMPLETED'].includes(raw)) return 'Delivered';
   return 'Unknown';
@@ -1386,6 +1418,7 @@ function materializeRow(row) {
     poDate: cleanText(row.poDate),
     deliveryDate: cleanText(row.deliveryDate),
     edd: cleanText(row.edd || row.revisedEstimatedDeliveryDate || row.revised_estimated_delivery_date || row.revisedDeliveryDate),
+    materialType: normalizeMaterialType(row.materialType || row.material_type || 'Unknown'),
     poNumber: cleanText(row.poNumber) || cleanText(row.id),
     vendorName: cleanText(row.vendorName) || 'Unknown Vendor',
     source: cleanText(row.source),
@@ -1547,6 +1580,7 @@ function groupedPOs(rows) {
       first.vendorName,
       first.gstin,
       first.source,
+      summarizeStatus(items, 'materialType'),
       ...items.map(item => item.itemDesc)
     ].join(' ').toLowerCase();
 
@@ -1557,6 +1591,7 @@ function groupedPOs(rows) {
       vendorName: first.vendorName || 'Unknown Vendor',
       gstin: first.gstin || '',
       source: first.source || '',
+      materialType: normalizeMaterialType(summarizeStatus(items, 'materialType')),
       terms: first.terms || '',
       deliveryDate: summarizeDate(items, 'deliveryDate') || first.deliveryDate || '',
       edd: summarizeDate(items, 'edd') || first.edd || '',
@@ -2055,6 +2090,7 @@ function renderPurchaseOrders({ pos }) {
       <div class="metric-block">
         <div class="vendor-name">${escapeHtml(po.vendorName)}</div>
         <div class="vendor-sub">${escapeHtml(po.gstin || 'No GSTIN')} · ${escapeHtml(po.source || 'No source')}</div>
+        <div class="badge material-badge ${materialTypeBadgeClass(po.materialType)}">${escapeHtml(normalizeMaterialType(po.materialType))}</div>
       </div>
       <div class="metric-block">
         <div class="metric-label">Products</div>
@@ -2451,6 +2487,7 @@ function openPoModal(po = null) {
     form.elements.vendorName.value = po.vendorName || '';
     form.elements.source.value = po.source || '';
     form.elements.gstin.value = po.gstin || '';
+    if (form.elements.materialType) form.elements.materialType.value = normalizeMaterialType(po.materialType || 'Unknown');
     form.elements.deliveryDate.value = po.deliveryDate || '';
     if (form.elements.edd) form.elements.edd.value = getPoEdd(po);
     const discountTypeInput = document.getElementById('summaryDiscountType');
@@ -2463,7 +2500,7 @@ function openPoModal(po = null) {
     if (amountPaidInput) amountPaidInput.value = String(number(po.amountPaid || 0));
     form.elements.paymentStatus.value = ['Paid', 'Partially Paid', 'Pending', 'Unknown'].includes(po.paymentStatus) ? po.paymentStatus : 'Unknown';
     form.elements.poStatus.value = ['Issued', 'Billed', 'Closed', 'Unknown'].includes(po.poStatus) ? po.poStatus : 'Unknown';
-    form.elements.deliveryStatus.value = ['Unknown', 'Partially Delivered', 'Delivered'].includes(po.deliveryStatus) ? po.deliveryStatus : 'Unknown';
+    form.elements.deliveryStatus.value = ['Unknown', 'In Transit', 'Partially Delivered', 'Delivered'].includes(po.deliveryStatus) ? po.deliveryStatus : 'Unknown';
     form.elements.terms.value = po.terms || '';
     po.items.forEach(item => linesMount.appendChild(createLineItemCard(item)));
   } else {
@@ -2479,6 +2516,7 @@ function openPoModal(po = null) {
     if (amountPaidInput) amountPaidInput.value = '0';
     form.elements.paymentStatus.value = 'Pending';
     form.elements.poStatus.value = 'Issued';
+    if (form.elements.materialType) form.elements.materialType.value = 'Unknown';
     form.elements.deliveryStatus.value = 'Unknown';
     if (form.elements.edd) form.elements.edd.value = '';
     linesMount.appendChild(createLineItemCard({ quantityOrdered: 1, itemTaxPercent: 18 }));
@@ -2551,6 +2589,7 @@ function collectPoFormPayload(existingPo = null) {
   const source = cleanText(form.elements.source.value);
   const gstin = cleanText(form.elements.gstin.value);
   const deliveryDate = form.elements.deliveryDate.value;
+  const materialType = normalizeMaterialType(form.elements.materialType?.value || 'Unknown');
   const edd = form.elements.edd ? form.elements.edd.value : '';
   const { discountType, discountInputValue, adjustmentAmount } = getDiscountStateFromInputs();
   const amountPaidInput = number(document.getElementById('summaryAmountPaidInput')?.value);
@@ -2590,6 +2629,7 @@ function collectPoFormPayload(existingPo = null) {
       id: base?.id || uid('manual'),
       poDate,
       deliveryDate,
+      materialType,
       edd,
       deliveryStatus,
       poNumber,
@@ -2710,6 +2750,7 @@ function openProductDetailModal(poKey) {
       <div class="detail-card"><div class="k">Balance Due</div><div class="v">${money(po.balanceDue || 0)}</div></div>
       <div class="detail-card"><div class="k">Payment</div><div class="v"><span class="badge ${badgeClass(po.paymentStatus)}">${escapeHtml(po.paymentStatus)}</span></div></div>
       <div class="detail-card"><div class="k">Delivery</div><div class="v"><span class="badge ${displayDeliveryBadgeClass(po)}">${escapeHtml(displayDeliveryStatus(po))}</span> <span class="small-text">${formatDate(po.deliveryDate)}</span></div></div>
+      <div class="detail-card"><div class="k">Material Type</div><div class="v"><span class="badge material-badge ${materialTypeBadgeClass(po.materialType)}">${escapeHtml(normalizeMaterialType(po.materialType))}</span></div></div>
       ${isPoDelayed(po) ? `<div class="detail-card"><div class="k">EDD <span class="info-icon" title="Revised Estimated Delivery Date">i</span></div><div class="v">${getPoEdd(po) ? formatDate(getPoEdd(po)) : 'Not set'}</div></div>` : ''}
     </div>
 
