@@ -185,6 +185,7 @@ let remoteSyncTimer = null;
 let remoteSyncInFlight = false;
 let queueProcessingInFlight = false;
 let completingFollowupContext = null;
+let mailingFollowupContext = null;
 
 function cleanConfigText(value) {
   return String(value ?? '').trim();
@@ -220,6 +221,63 @@ function derivePaymentState(poTotal, amountPaidInput = 0, explicitBalanceDue = n
   return { amountPaid, balanceDue, paymentStatus };
 }
 
+
+function paymentProgressPercent(po) {
+  const total = Math.max(0, number(po?.poTotal));
+  const explicitPaid = Math.max(0, number(po?.amountPaid));
+  const balance = po?.balanceDue === null || po?.balanceDue === undefined || po?.balanceDue === '' ? null : Math.max(0, number(po?.balanceDue));
+  const status = normalizePaymentStatus(po?.paymentStatus || 'Pending');
+  if (status === 'Paid') return 100;
+  if (total <= 0) return status === 'Paid' ? 100 : 0;
+  let paid = explicitPaid;
+  if (balance !== null && Number.isFinite(balance)) paid = Math.max(0, total - balance);
+  let percent = Math.round((Math.min(total, paid) / total) * 100);
+  if (status === 'Pending') percent = 0;
+  if (status === 'Partially Paid' && percent <= 0) percent = 1;
+  if (status === 'Partially Paid' && percent >= 100) percent = 99;
+  return Math.max(0, Math.min(100, percent));
+}
+
+function paymentProgressStatus(po) {
+  const percent = paymentProgressPercent(po);
+  if (percent >= 100) return 'Paid';
+  if (percent > 0) return 'Partially Paid';
+  return 'Pending';
+}
+
+function paymentProgressClass(po) {
+  const percent = paymentProgressPercent(po);
+  if (percent >= 100) return 'paid';
+  if (percent > 0) return 'partial';
+  return 'pending';
+}
+
+function renderPaymentProgress(po) {
+  const percent = paymentProgressPercent(po);
+  const status = paymentProgressStatus(po);
+  const total = Math.max(0, number(po?.poTotal));
+  const paidFromBalance = po?.balanceDue === null || po?.balanceDue === undefined || po?.balanceDue === ''
+    ? number(po?.amountPaid || 0)
+    : Math.max(0, total - number(po?.balanceDue));
+  const paid = Math.max(0, Math.min(total, paidFromBalance));
+  const balance = Math.max(0, number(po?.balanceDue ?? Math.max(0, total - paid)));
+  return `
+    <div class="payment-progress payment-${paymentProgressClass(po)}" title="${escapeHtml(status)} · ${percent}% paid">
+      <div class="payment-progress-head">
+        <strong>${percent}%</strong>
+        <span>${escapeHtml(status)}</span>
+      </div>
+      <div class="payment-progress-track" aria-label="${percent}% paid">
+        <span style="width:${percent}%"></span>
+      </div>
+      <div class="payment-progress-meta">
+        <span>Paid ${money(paid)}</span>
+        <span>Bal ${money(balance)}</span>
+      </div>
+    </div>
+  `;
+}
+
 function getDiscountStateFromInputs() {
   const typeEl = document.getElementById('summaryDiscountType');
   const inputEl = document.getElementById('summaryDiscountInput');
@@ -239,6 +297,7 @@ function calculatePoBreakdown(lines, discountType = 'amount', discountInputValue
     return {
       ...line,
       quantityOrdered,
+      uom: normalizeUom(line.uom || 'Nos'),
       itemPrice,
       itemTaxPercent,
       lineBase
@@ -348,6 +407,7 @@ async function loadRemoteStateFromSupabase() {
     itemPrice: Number(line.item_price || 0),
     itemDesc: line.item_desc || '',
     quantityOrdered: Number(line.quantity_ordered || 0),
+    uom: cleanText(line.uom || line.unit || line.unit_name || ''),
     itemTax: line.item_tax_percent ? `GST${line.item_tax_percent}` : '',
     itemTaxPercent: Number(line.item_tax_percent || 0),
     itemTaxAmount: Number(line.item_tax_amount || 0),
@@ -415,7 +475,7 @@ async function loadRemoteStateFromSupabase() {
     gstin: m.gstin || ''
   }]));
   state.deletedVendors = vendors.filter(v => v.is_deleted).map(v => v.vendor_name);
-  state.followups = followupsRes.data || [];
+  state.followups = (followupsRes.data || []).filter(row => !isAcknowledgementFollowup(row));
   state.activityEvents = activityEventsRes.data || [];
   return true;
 }
@@ -498,6 +558,7 @@ async function syncStateToSupabase() {
       is_charge: Boolean(line.isCharge),
       item_desc: line.itemDesc,
       quantity_ordered: toNumeric(line.quantityOrdered),
+      uom: cleanText(line.uom || ''),
       item_price: toNumeric(line.itemPrice),
       item_tax_percent: toNumeric(line.itemTaxPercent),
       item_tax_amount: toNumeric(line.itemTaxAmount),
@@ -547,6 +608,7 @@ async function syncStateToSupabase() {
     }
 
     await generateFollowupsForPOs(derived.pos);
+    await loadRemoteStateFromSupabase();
   } catch (error) {
     console.error('Supabase sync failed', error);
     const message = String(error?.message || error || '');
@@ -679,6 +741,7 @@ function convertZohoPoPayloadToDbPayload(payload) {
   const poLines = lineItems.map((item, index) => {
     const itemDesc = cleanText(item?.name || item?.item_desc || item?.description);
     const quantityOrdered = roundMoney(item?.quantity ?? item?.qty ?? 0);
+    const uom = normalizeUom(item?.unit || item?.uom || item?.unit_name || item?.unit_measure || item?.unit_of_measurement || item?.measure || '');
     const itemPrice = roundMoney(item?.rate ?? item?.item_price ?? 0);
     const itemTotal = roundMoney(item?.item_total ?? (quantityOrdered * itemPrice));
     const itemTaxPercent = roundMoney(item?.tax_percentage ?? item?.item_tax_percent ?? 0);
@@ -699,6 +762,7 @@ function convertZohoPoPayloadToDbPayload(payload) {
       is_charge: isCharge,
       item_desc: itemDesc,
       quantity_ordered: quantityOrdered,
+      uom,
       item_price: itemPrice,
       item_tax_percent: itemTaxPercent,
       item_tax_amount: itemTaxAmount,
@@ -832,7 +896,12 @@ async function upsertDbPayloadToSupabase(payload) {
     charge_count: Number(po.charge_count || 0),
     total_qty: toNumeric(po.total_qty),
     total_charge_value: toNumeric(po.total_charge_value),
-    reference_no: cleanText(po.reference_no)
+    reference_no: cleanText(po.reference_no),
+    material_type: normalizeMaterialType(po.material_type || po.materialType || 'Unknown'),
+    vendor_email: cleanText(po.vendor_email || po.vendorEmail || ''),
+    vendor_phone: cleanText(po.vendor_phone || po.vendorPhone || ''),
+    delay_reason: cleanText(po.delay_reason || po.delayReason || ''),
+    edd: safeDate(po.edd || po.revised_estimated_delivery_date || po.revised_delivery_date)
   })), 'po_number');
 
   const linePayload = dedupeRecordsByKey((normalized.po_lines || []).map(line => ({
@@ -848,6 +917,7 @@ async function upsertDbPayloadToSupabase(payload) {
     is_charge: Boolean(line.is_charge) || inferLineType(line.item_desc, line.line_type) === 'charge',
     item_desc: cleanText(line.item_desc),
     quantity_ordered: toNumeric(line.quantity_ordered),
+    uom: normalizeUom(line.uom || line.unit || line.unit_name || ''),
     item_price: toNumeric(line.item_price),
     item_tax_percent: toNumeric(line.item_tax_percent),
     item_tax_amount: toNumeric(line.item_tax_amount),
@@ -875,9 +945,14 @@ async function upsertDbPayloadToSupabase(payload) {
   return { vendors: vendorsPayload.length, purchaseOrders: poPayload.length, poLines: linePayload.length };
 }
 
-async function refreshStateFromSupabase() {
+async function refreshStateFromSupabase(options = {}) {
   if (!useSupabase) return;
+  const shouldGenerateFollowups = options.generateFollowups !== false;
   await loadRemoteStateFromSupabase();
+  if (shouldGenerateFollowups) {
+    await generateFollowupsForPOs(buildDerived().pos);
+    await loadRemoteStateFromSupabase();
+  }
   renderAll();
 }
 
@@ -1017,6 +1092,7 @@ function convertDbImportPayloadToLocalRows(payload) {
       terms: String(line.terms ?? po.terms ?? ''),
       itemDesc: cleanText(line.item_desc),
       quantityOrdered: number(line.quantity_ordered),
+      uom: normalizeUom(line.uom || line.unit || line.unit_name || ''),
       itemPrice: number(line.item_price),
       itemTaxPercent: number(line.item_tax_percent),
       itemTaxAmount: number(line.item_tax_amount),
@@ -1241,6 +1317,21 @@ function badgeClass(value) {
   return 'unknown';
 }
 
+function normalizeUom(value) {
+  const raw = cleanText(value);
+  if (!raw) return 'Nos';
+  const lower = raw.toLowerCase();
+  if (['m', 'meter', 'meters', 'metre', 'metres', 'mtr', 'mtrs'].includes(lower)) return 'Mtr';
+  if (['nos', 'no', 'number', 'numbers', 'pcs', 'piece', 'pieces', 'qty'].includes(lower)) return 'Nos';
+  if (['kg', 'kgs', 'kilogram', 'kilograms'].includes(lower)) return 'Kg';
+  if (['g', 'gm', 'gram', 'grams'].includes(lower)) return 'Gm';
+  if (['ltr', 'ltrs', 'liter', 'liters', 'litre', 'litres', 'l'].includes(lower)) return 'Ltr';
+  if (['set', 'sets'].includes(lower)) return 'Set';
+  if (['box', 'boxes'].includes(lower)) return 'Box';
+  if (['roll', 'rolls'].includes(lower)) return 'Roll';
+  return raw;
+}
+
 function materializeRow(row) {
   const itemTotal = number(row.itemTotal) || (number(row.itemPrice) * number(row.quantityOrdered));
   const itemTaxAmount = number(row.itemTaxAmount) || (itemTotal * (number(row.itemTaxPercent) / 100));
@@ -1268,6 +1359,7 @@ function materializeRow(row) {
     terms: String(row.terms ?? ''),
     itemDesc: cleanText(row.itemDesc) || 'Unnamed Item',
     quantityOrdered: number(row.quantityOrdered),
+    uom: normalizeUom(row.uom || row.unit || row.unitName || ''),
     itemPrice: number(row.itemPrice),
     itemTaxPercent: number(row.itemTaxPercent),
     itemTotal,
@@ -1350,7 +1442,8 @@ function groupedPoItems(items) {
         lineGrandTotal: 0,
         itemTaxPercent: number(item.itemTaxPercent),
         lines: [],
-        prices: []
+        prices: [],
+        uoms: []
       });
     }
     const group = map.get(key);
@@ -1360,6 +1453,7 @@ function groupedPoItems(items) {
     group.lineGrandTotal += number(item.lineGrandTotal);
     group.lines.push(item);
     if (number(item.itemPrice) > 0) group.prices.push(number(item.itemPrice));
+    if (cleanText(item.uom)) group.uoms.push(normalizeUom(item.uom));
   });
 
   return Array.from(map.values()).map(group => {
@@ -1367,12 +1461,15 @@ function groupedPoItems(items) {
     const minPrice = uniquePrices.length ? Math.min(...uniquePrices) : 0;
     const maxPrice = uniquePrices.length ? Math.max(...uniquePrices) : 0;
     const avgPrice = group.quantityOrdered > 0 ? (group.itemTotal / group.quantityOrdered) : 0;
+    const uniqueUoms = [...new Set(group.uoms.filter(Boolean))];
+    const displayUom = uniqueUoms.length === 1 ? uniqueUoms[0] : (uniqueUoms.length ? 'Mixed' : 'Nos');
     return {
       ...group,
       lineCount: group.lines.length,
       minPrice,
       maxPrice,
       avgPrice,
+      displayUom,
       displayPrice: minPrice && maxPrice && minPrice !== maxPrice ? `${money(minPrice)} to ${money(maxPrice)}` : (minPrice ? money(minPrice) : '—'),
       displayTaxPercent: group.lines.length === 1 ? formatNumber(group.itemTaxPercent) : 'Mixed'
     };
@@ -1703,7 +1800,7 @@ function statusSortValue(key, value) {
     return ranks[cleanText(value).toUpperCase()] ?? ranks[raw] ?? 99;
   }
   if (key === 'deliveryStatus') {
-    const ranks = { UNKNOWN: 0, 'PARTIALLY DELIVERED': 1, DELAYED: 2, DELIVERED: 3, MIXED: 4 };
+    const ranks = { UNKNOWN: 0, 'IN TRANSIT': 1, 'PARTIALLY DELIVERED': 2, DELAYED: 3, DELIVERED: 4, MIXED: 5 };
     return ranks[cleanText(value).toUpperCase()] ?? ranks[raw] ?? 99;
   }
   return null;
@@ -1715,8 +1812,12 @@ function sortData(items, sortValue) {
   return items.slice().sort((a, b) => {
     let av = key === 'deliveryStatus' ? displayDeliveryStatus(a) : a[key];
     let bv = key === 'deliveryStatus' ? displayDeliveryStatus(b) : b[key];
-    const statusA = statusSortValue(key, av);
-    const statusB = statusSortValue(key, bv);
+    if (key === 'paymentStatus') {
+      av = paymentProgressPercent(a);
+      bv = paymentProgressPercent(b);
+    }
+    const statusA = key === 'paymentStatus' ? null : statusSortValue(key, av);
+    const statusB = key === 'paymentStatus' ? null : statusSortValue(key, bv);
 
     if (statusA !== null && statusB !== null) {
       av = statusA;
@@ -1881,37 +1982,102 @@ async function generateFollowupsForPOs(pos = []) {
   }
 }
 
+function enrichFollowupRowForCard(row, po = {}) {
+  return {
+    ...row,
+    poKey: po.poKey || row.poKey || row.po_number,
+    poTotal: po.poTotal || row.poTotal || 0,
+    productCount: po.productCount || po.itemCount || row.productCount || 0,
+    po_delivery_date: po.deliveryDate || row.po_delivery_date || row.delivery_date || '',
+    latestUpdate: row.latest_update || row.completion_note || row.notes || row.latestUpdate || '',
+    isVirtual: Boolean(row.isVirtual)
+  };
+}
+
 function buildFollowupCards(pos = []) {
+  const selectedDate = parseDateOnly(state.filters.followupDate) || todayDateOnly();
   const poMap = new Map((pos || []).map(po => [cleanText(po.poNumber), po]));
+
   const persisted = (state.followups || [])
     .filter(row => !isAcknowledgementFollowup(row))
-    .map(row => {
-    const po = poMap.get(cleanText(row.po_number)) || {};
-    return {
-      ...row,
-      poKey: po.poKey || row.po_number,
-      poTotal: po.poTotal || 0,
-      productCount: po.productCount || po.itemCount || 0,
-      po_delivery_date: po.deliveryDate || row.po_delivery_date || row.delivery_date || '',
-      latestUpdate: row.latest_update || row.completion_note || row.notes || '',
-      isVirtual: false
-    };
+    .map(row => enrichFollowupRowForCard(row, poMap.get(cleanText(row.po_number)) || {}));
+
+  const persistedByPoStage = new Map(persisted.map(row => [
+    `${cleanText(row.po_number)}__${cleanText(row.followup_stage)}`,
+    row
+  ]));
+
+  const visibleByPo = new Map();
+  const addVisible = (row, poFallback = null) => {
+    if (!row || isAcknowledgementFollowup(row)) return;
+    const poNumber = cleanText(row.po_number || row.poNumber || poFallback?.poNumber);
+    if (!poNumber) return;
+    const enriched = enrichFollowupRowForCard(row, poFallback || poMap.get(poNumber) || {});
+    const existing = visibleByPo.get(poNumber);
+    if (!existing) {
+      visibleByPo.set(poNumber, enriched);
+      return;
+    }
+
+    // Keep one card per PO. Prefer current/due card over older persisted rows,
+    // and completed card only when no active task is pending.
+    const existingStatus = normalizeKey(existing.status || 'Pending');
+    const newStatus = normalizeKey(enriched.status || 'Pending');
+    const existingDue = parseDateOnly(existing.due_date)?.getTime() || 0;
+    const newDue = parseDateOnly(enriched.due_date)?.getTime() || 0;
+    if (existingStatus.includes('COMPLETE') && !newStatus.includes('COMPLETE')) {
+      visibleByPo.set(poNumber, enriched);
+    } else if (!existingStatus.includes('COMPLETE') && !newStatus.includes('COMPLETE') && newDue >= existingDue) {
+      visibleByPo.set(poNumber, enriched);
+    }
+  };
+
+  // Main rule: for every active non-delivered PO, show the current follow-up
+  // when it is due today or already missed. This fixes cases like STJ's PO:
+  // delivery date is today, so the 100% follow-up must appear today.
+  (pos || []).forEach(po => {
+    if (!po || normalizeDeliveryStatus(po.deliveryStatus) === 'Delivered') return;
+    const current = getCurrentFollowupForPo(po, selectedDate);
+    if (!current || isAcknowledgementFollowup(current)) return;
+    const dueDate = parseDateOnly(current.due_date);
+    if (!dueDate || !selectedDate || dueDate > selectedDate) return;
+    const poNumber = cleanText(current.po_number || po.poNumber);
+    const stage = cleanText(current.followup_stage);
+    const persistedMatch = persistedByPoStage.get(`${poNumber}__${stage}`);
+    addVisible(persistedMatch || current, po);
   });
-  const persistedKeys = new Set(persisted.map(row => cleanText(row.po_number)));
-  const virtual = (pos || [])
-    .filter(po => !persistedKeys.has(cleanText(po.poNumber)))
-    .map(po => getCurrentFollowupForPo(po, parseDateOnly(state.filters.followupDate) || todayDateOnly()))
-    .filter(row => row && !isAcknowledgementFollowup(row));
-  return [...persisted, ...virtual];
+
+  // Preserve completed follow-ups for the selected date.
+  persisted.forEach(row => {
+    const isCompleted = normalizeKey(row.status).includes('COMPLETE');
+    if (!isCompleted) return;
+    const completedDate = parseDateOnly(row.completed_at || row.updated_at || row.created_at);
+    if (completedDate && selectedDate && completedDate.getTime() === selectedDate.getTime()) {
+      addVisible(row, poMap.get(cleanText(row.po_number)) || null);
+    }
+  });
+
+  // Fallback for old DB rows when the PO no longer exists locally, or when
+  // a missed DB follow-up has no matching generated current-stage card.
+  persisted.forEach(row => {
+    const isCompleted = normalizeKey(row.status).includes('COMPLETE');
+    if (isCompleted) return;
+    const dueDate = parseDateOnly(row.due_date);
+    if (dueDate && selectedDate && dueDate <= selectedDate) {
+      addVisible(row, poMap.get(cleanText(row.po_number)) || null);
+    }
+  });
+
+  return Array.from(visibleByPo.values());
 }
 
 function getFollowupCardStatus(card, selectedDate) {
   const status = cleanText(card.status || 'Pending');
   const isCompleted = normalizeKey(status).includes('COMPLETE');
   const dueDate = parseDateOnly(card.due_date);
-  const isDue = !isCompleted && dueDate && selectedDate && dueDate <= selectedDate;
   if (isCompleted) return 'Completed';
-  if (isDue) return dueDate < selectedDate ? 'Follow-up Overdue' : 'Due Today';
+  if (dueDate && selectedDate && dueDate < selectedDate) return 'Missed Follow-up';
+  if (dueDate && selectedDate && dueDate.getTime() === selectedDate.getTime()) return 'Due Today';
   if (normalizeKey(card.email_status).includes('SENT')) return 'Email Sent';
   return status || 'Pending';
 }
@@ -1955,11 +2121,11 @@ function getEffectiveFollowupPriority(card, viewStatus) {
 function shouldShowFollowupCard(card, selectedDate) {
   const status = cleanText(card.status || 'Pending');
   const isCompleted = normalizeKey(status).includes('COMPLETE');
-  const dueDate = parseDateOnly(card.due_date);
   if (isCompleted) {
     const completedDate = parseDateOnly(card.completed_at || card.updated_at || card.created_at);
     return completedDate && selectedDate && completedDate.getTime() === selectedDate.getTime();
   }
+  const dueDate = parseDateOnly(card.due_date);
   return Boolean(dueDate && selectedDate && dueDate <= selectedDate);
 }
 
@@ -1979,7 +2145,8 @@ function renderFollowups({ pos }) {
   ];
   const statusOptions = [
     { value: 'all', label: 'All Status' },
-    { value: 'due', label: 'Due / Overdue' },
+    { value: 'due_today', label: 'Due Today' },
+    { value: 'missed', label: 'Missed Follow-ups' },
     { value: 'pending', label: 'Pending' },
     { value: 'email_sent', label: 'Email Sent' },
     { value: 'completed', label: 'Completed' }
@@ -1994,7 +2161,8 @@ function renderFollowups({ pos }) {
     if (state.filters.followupMaterial !== 'all' && material !== state.filters.followupMaterial) return false;
     const viewStatus = getFollowupCardStatus(card, selectedDate);
     const rawStatus = normalizeKey(card.status || 'Pending');
-    if (state.filters.followupStatus === 'due' && !['Due Today', 'Follow-up Overdue'].includes(viewStatus)) return false;
+    if (state.filters.followupStatus === 'due_today' && viewStatus !== 'Due Today') return false;
+    if (state.filters.followupStatus === 'missed' && viewStatus !== 'Missed Follow-up') return false;
     if (state.filters.followupStatus === 'pending' && !rawStatus.includes('PENDING')) return false;
     if (state.filters.followupStatus === 'completed' && !rawStatus.includes('COMPLETE')) return false;
     if (state.filters.followupStatus === 'email_sent' && !normalizeKey(card.email_status).includes('SENT')) return false;
@@ -2004,17 +2172,21 @@ function renderFollowups({ pos }) {
   cards.sort((a, b) => {
     const aDue = parseDateOnly(a.due_date)?.getTime() || 0;
     const bDue = parseDateOnly(b.due_date)?.getTime() || 0;
-    const aPriority = normalizeKey(getFollowupCardStatus(a, selectedDate)).includes('OVERDUE') ? 0 : normalizeKey(getFollowupCardStatus(a, selectedDate)).includes('DUE') ? 1 : 2;
-    const bPriority = normalizeKey(getFollowupCardStatus(b, selectedDate)).includes('OVERDUE') ? 0 : normalizeKey(getFollowupCardStatus(b, selectedDate)).includes('DUE') ? 1 : 2;
+    const aStatusKey = normalizeKey(getFollowupCardStatus(a, selectedDate));
+    const bStatusKey = normalizeKey(getFollowupCardStatus(b, selectedDate));
+    const aPriority = aStatusKey.includes('MISSED') ? 0 : aStatusKey.includes('DUE') ? 1 : 2;
+    const bPriority = bStatusKey.includes('MISSED') ? 0 : bStatusKey.includes('DUE') ? 1 : 2;
     return aPriority - bPriority || aDue - bDue;
   });
 
-  const dueCount = cards.filter(card => ['Due Today', 'Follow-up Overdue'].includes(getFollowupCardStatus(card, selectedDate))).length;
+  const dueTodayCount = cards.filter(card => getFollowupCardStatus(card, selectedDate) === 'Due Today').length;
+  const missedCount = cards.filter(card => getFollowupCardStatus(card, selectedDate) === 'Missed Follow-up').length;
   const completedCount = cards.filter(card => normalizeKey(card.status).includes('COMPLETE')).length;
   const callCount = cards.filter(card => !normalizeKey(card.call_status).includes('NOT REQUIRED')).length;
   summaryMount.innerHTML = `
-    <span class="followup-stat"><strong>${formatNumber(cards.length)}</strong> PO cards</span>
-    <span class="followup-stat danger"><strong>${formatNumber(dueCount)}</strong> due / overdue</span>
+    <span class="followup-stat"><strong>${formatNumber(cards.length)}</strong> action cards</span>
+    <span class="followup-stat warning"><strong>${formatNumber(dueTodayCount)}</strong> due today</span>
+    <span class="followup-stat danger"><strong>${formatNumber(missedCount)}</strong> missed follow-ups</span>
     <span class="followup-stat good"><strong>${formatNumber(completedCount)}</strong> completed</span>
     <span class="followup-stat"><strong>${formatNumber(callCount)}</strong> call required</span>
   `;
@@ -2026,7 +2198,7 @@ function renderFollowups({ pos }) {
 
   listMount.innerHTML = cards.map(card => {
     const viewStatus = getFollowupCardStatus(card, selectedDate);
-    const isDue = ['Due Today', 'Follow-up Overdue'].includes(viewStatus);
+    const isDue = ['Due Today', 'Missed Follow-up'].includes(viewStatus);
     const isCompleted = normalizeKey(card.status).includes('COMPLETE');
     const isEmailSent = normalizeKey(card.email_status).includes('SENT');
     const priorityInfo = getEffectiveFollowupPriority(card, viewStatus);
@@ -2375,6 +2547,192 @@ async function completeFollowup(event) {
   }
 }
 
+
+function getFollowupTemplateKey(card, po) {
+  const material = normalizeMaterialType(card?.material_type || po?.materialType || 'Unknown');
+  const stage = normalizeKey(card?.followup_key || card?.followup_stage || 'FOLLOWUP');
+  return `${material}_${stage || 'FOLLOWUP'}`;
+}
+
+function buildFollowupMailTemplate(card, po) {
+  const poNumber = cleanText(card?.po_number || po?.poNumber || '');
+  const vendorName = cleanText(card?.vendor_name || po?.vendorName || 'Vendor');
+  const materialType = normalizeMaterialType(card?.material_type || po?.materialType || 'Unknown');
+  const stage = cleanText(card?.followup_stage || 'Vendor Follow-up');
+  const activity = cleanText(card?.followup_activity || 'Please confirm current PO status and delivery timeline.');
+  const communication = cleanText(card?.communication_method || 'Email');
+  const deliveryDate = formatDate(po?.deliveryDate || card?.po_delivery_date || '');
+  const followupDue = formatDate(card?.due_date || '');
+  const edd = formatDate(po?.edd || card?.edd || '');
+  const isDelay = normalizeKey(stage).includes('DELAY') || normalizeKey(activity).includes('DELAY');
+  const isMto = materialType === 'MTO';
+  const isRto = materialType === 'RTO';
+  const subjectPrefix = isDelay ? 'Delay Follow-up Required' : 'Vendor Follow-up Required';
+  const subject = `${subjectPrefix}: PO ${poNumber} - ${stage}`;
+  const stageLine = isMto
+    ? 'This is an MTO follow-up. Please share the current production/manufacturing status clearly.'
+    : isRto
+      ? 'This is an RTO follow-up. Please confirm readiness, dispatch, and delivery status clearly.'
+      : 'This is a PO follow-up. Please confirm the latest status clearly.';
+  const delayAsk = isDelay
+    ? '\nSince the PO is delayed, please share:\n- reason for delay\n- revised estimated delivery date\n- dispatch status\n- expected arrival date\n'
+    : '';
+  const body = [
+    `Dear ${vendorName},`,
+    '',
+    `This is a follow-up for PO ${poNumber}.`,
+    stageLine,
+    '',
+    `Follow-up Stage: ${stage}`,
+    `Required Update: ${activity}`,
+    `Communication Method: ${communication}`,
+    '',
+    `PO Date: ${formatDate(po?.poDate || card?.po_date || '')}`,
+    `Original Delivery Date: ${deliveryDate}`,
+    `Follow-up Due Date: ${followupDue}`,
+    edd !== '—' ? `Current EDD: ${edd}` : '',
+    delayAsk,
+    'Please reply with the latest status and expected delivery timeline.',
+    '',
+    'Regards,',
+    'Stack n Stock Procurement Team'
+  ].filter(line => line !== '').join('\n');
+  return { subject, body, templateKey: getFollowupTemplateKey(card, po) };
+}
+
+function getFollowupVendorEmail(card, po) {
+  const vendorName = cleanText(card?.vendor_name || po?.vendorName || '');
+  return cleanText(card?.vendor_email || po?.vendorEmail || state.vendorContacts?.[vendorName]?.email || '');
+}
+
+function openFollowupMailModal(followupId, poKey) {
+  const { card, po } = getFollowupByIdOrPo(followupId, poKey);
+  if (!card) {
+    alert('Follow-up card not found. Refresh once and try again.');
+    return;
+  }
+  mailingFollowupContext = { followupId: cleanText(followupId), poKey, card, po };
+  const form = document.getElementById('followupMailForm');
+  if (!form) return;
+  form.reset();
+  const { subject, body, templateKey } = buildFollowupMailTemplate(card, po);
+  form.elements.followupId.value = cleanText(followupId);
+  form.elements.poKey.value = cleanText(poKey || card.poKey || card.po_number);
+  form.elements.templateKey.value = templateKey;
+  form.elements.to.value = getFollowupVendorEmail(card, po);
+  form.elements.cc.value = '';
+  form.elements.queuedBy.value = '';
+  form.elements.subject.value = subject;
+  form.elements.body.value = body;
+  document.getElementById('followupMailTitle').textContent = `Send Mail - ${card.po_number || poKey}`;
+  document.getElementById('followupMailSubtext').textContent = `${card.vendor_name || po?.vendorName || 'Vendor'} • ${card.followup_stage || 'Follow-up'}`;
+  document.getElementById('followupMailStage').textContent = card.followup_stage || 'Follow-up';
+  document.getElementById('followupMailAction').textContent = card.followup_activity || 'Follow up with vendor';
+  document.getElementById('followupMailTemplate').textContent = templateKey;
+  document.getElementById('followupMailDelivery').textContent = formatDate(po?.deliveryDate || card.po_delivery_date || '');
+  document.getElementById('followupMailBackdrop')?.classList.remove('hidden');
+}
+
+function closeFollowupMailModal() {
+  document.getElementById('followupMailBackdrop')?.classList.add('hidden');
+  mailingFollowupContext = null;
+}
+
+function applyFollowupMailQueuedLocally(followupRow, queuePayload) {
+  const id = cleanText(followupRow.id);
+  const poNumber = cleanText(followupRow.po_number || queuePayload.po_number);
+  const stage = cleanText(followupRow.followup_stage || queuePayload.followup_stage);
+  const updated = { ...followupRow, email_status: 'Pending', latestUpdate: `Mail queued for Zoho Flow by ${queuePayload.created_by || 'user'}.` };
+  state.followups = (state.followups || []).filter(item => {
+    if (id && cleanText(item.id) === id) return false;
+    return !(cleanText(item.po_number) === poNumber && cleanText(item.followup_stage) === stage);
+  });
+  state.followups.push(updated);
+}
+
+async function queueFollowupMail(event) {
+  event.preventDefault();
+  const form = event.target;
+  const submitBtn = form.querySelector('button[type="submit"]');
+  const originalText = submitBtn?.textContent || 'Queue Mail';
+  const context = mailingFollowupContext || getFollowupByIdOrPo(form.elements.followupId.value, form.elements.poKey.value);
+  const card = context.card;
+  const po = context.po;
+  if (!card) {
+    alert('Follow-up card not found. Refresh once and try again.');
+    return;
+  }
+  if (!useSupabase) {
+    alert('Mail queue requires Supabase because Zoho Flow reads vendor_email_queue.');
+    return;
+  }
+  const to = cleanText(form.elements.to.value);
+  const cc = cleanText(form.elements.cc.value);
+  const queuedBy = cleanText(form.elements.queuedBy.value);
+  const subject = cleanText(form.elements.subject.value);
+  const body = cleanText(form.elements.body.value);
+  const templateKey = cleanText(form.elements.templateKey.value || getFollowupTemplateKey(card, po));
+  if (!to) {
+    alert('Vendor email is required before queueing mail.');
+    return;
+  }
+  if (!subject) {
+    alert('Email subject is required.');
+    return;
+  }
+  if (!body) {
+    alert('Email body is required.');
+    return;
+  }
+  try {
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Queueing...';
+    }
+    const persisted = await ensureFollowupPersisted(card);
+    const followupId = cleanText(persisted.id);
+    const poNumber = cleanText(persisted.po_number || card.po_number);
+    const vendorName = cleanText(persisted.vendor_name || card.vendor_name || po?.vendorName || 'Unknown Vendor');
+    const materialType = normalizeMaterialType(persisted.material_type || card.material_type || po?.materialType || 'Unknown');
+    const followupStage = cleanText(persisted.followup_stage || card.followup_stage || 'Follow-up');
+    const queuePayload = {
+      followup_id: followupId || null,
+      po_number: poNumber,
+      vendor_name: vendorName,
+      vendor_email: to,
+      cc_email: cc || null,
+      subject,
+      body,
+      material_type: materialType,
+      followup_stage: followupStage,
+      template_key: templateKey,
+      status: 'Pending',
+      created_by: queuedBy || null
+    };
+    const { error: queueError } = await supabaseClient.from('vendor_email_queue').insert(queuePayload);
+    if (queueError) throw queueError;
+    const { error: followupError } = await supabaseClient.from('po_followups').update({ email_status: 'Pending', updated_at: new Date().toISOString() }).eq('id', followupId);
+    if (followupError) throw followupError;
+    const logPayload = { followup_id: followupId || null, po_number: poNumber, action_type: 'Email Queued', update_received: `Mail queued to ${to}`, done_by: queuedBy || null, communication_method: 'Email', notes: subject };
+    const { error: logError } = await supabaseClient.from('po_followup_logs').insert(logPayload);
+    if (logError) throw logError;
+    await insertPoActivityEvent({ po_number: poNumber, event_type: 'email_queued', event_title: 'Follow-up Email Queued', event_description: `${followupStage} email queued to ${to}.`, actor: queuedBy || '', metadata: { followup_id: followupId, followup_stage: followupStage, vendor_email: to, cc_email: cc, template_key: templateKey } });
+    applyFollowupMailQueuedLocally({ ...persisted, ...card }, queuePayload);
+    if (useSupabase) await loadRemoteStateFromSupabase();
+    closeFollowupMailModal();
+    renderAll();
+    alert('Mail queued. Zoho Flow will send it from vendor_email_queue.');
+  } catch (error) {
+    console.error('Queue follow-up mail failed', error);
+    alert(`Queue mail failed: ${error.message || error}`);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalText;
+    }
+  }
+}
+
 function setSelectOptions(id, options, selectedValue, placeholderLabel = 'All') {
   const el = document.getElementById(id);
   if (!el) return;
@@ -2400,7 +2758,7 @@ function renderKpis({ pos, vendors, products, rows }) {
     return sum + Math.max(0, number(derived.balanceDue));
   }, 0);
   const deliveredCount = pos.filter(po => po.deliveryStatus === 'Delivered').length;
-  const partialPaymentCount = pos.filter(po => po.paymentStatus === 'Partially Paid').length;
+  const partialPaymentCount = pos.filter(po => paymentProgressStatus(po) === 'Partially Paid').length;
   const cards = [
     { label: 'Total PO Value', value: money(totalPOValue), note: `${pos.length} purchase orders` },
     { label: 'Open Payment Value', value: money(openPaymentValue), note: 'Calculated from balance due' },
@@ -2662,7 +3020,7 @@ function closePoStatusTimeline() {
 
 function renderPurchaseOrders({ pos }) {
   const vendors = ['all', ...new Set(pos.map(po => po.vendorName).filter(Boolean))].sort();
-  const paymentStatuses = ['all', ...new Set(pos.map(po => po.paymentStatus).filter(Boolean))];
+  const paymentStatuses = ['all', ...new Set(pos.map(po => paymentProgressStatus(po)).filter(Boolean))];
   const poStatuses = ['all', ...new Set(pos.map(po => po.poStatus).filter(Boolean))];
   const deliveryStatuses = ['all', ...new Set(pos.map(displayDeliveryStatus).filter(Boolean))];
   const selectedDeliveryFilter = deliveryStatuses.includes(state.filters.poDelivery) ? state.filters.poDelivery : 'all';
@@ -2678,7 +3036,7 @@ function renderPurchaseOrders({ pos }) {
     const search = state.filters.poSearch.toLowerCase();
     if (search && !po.searchBlob.includes(search)) return false;
     if (state.filters.poVendor !== 'all' && po.vendorName !== state.filters.poVendor) return false;
-    if (state.filters.poPayment !== 'all' && po.paymentStatus !== state.filters.poPayment) return false;
+    if (state.filters.poPayment !== 'all' && paymentProgressStatus(po) !== state.filters.poPayment) return false;
     if (state.filters.poStatus !== 'all' && po.poStatus !== state.filters.poStatus) return false;
     if (state.filters.poDelivery !== 'all' && displayDeliveryStatus(po) !== state.filters.poDelivery) return false;
     return true;
@@ -2705,9 +3063,9 @@ function renderPurchaseOrders({ pos }) {
         <div class="metric-label">PO Total</div>
         <div class="metric-value total-value">${money(po.poTotal)}</div>
       </div>
-      <div class="metric-block">
+      <div class="metric-block payment-metric-block">
         <div class="metric-label">Payment</div>
-        <div class="badge ${badgeClass(po.paymentStatus)}">${escapeHtml(po.paymentStatus)}</div>
+        ${renderPaymentProgress(po)}
       </div>
       <div class="metric-block">
         <div class="metric-label">PO Status</div>
@@ -3047,7 +3405,11 @@ function createLineItemCard(values = {}) {
       </label>
       <label class="field">
         <span>Qty</span>
-        <input class="control-input" type="number" min="0" step="1" name="quantityOrdered" value="${escapeHtml(values.quantityOrdered ?? 1)}" required />
+        <input class="control-input" type="number" min="0" step="0.001" name="quantityOrdered" value="${escapeHtml(values.quantityOrdered ?? 1)}" required />
+      </label>
+      <label class="field">
+        <span>UOM</span>
+        <input class="control-input" list="uomOptions" name="uom" value="${escapeHtml(normalizeUom(values.uom || 'Nos'))}" placeholder="Nos / Mtr / Kg" />
       </label>
       <label class="field">
         <span>Unit Price</span>
@@ -3150,6 +3512,7 @@ function refreshLineIndexes() {
 function recalcPoSummary() {
   const lines = Array.from(document.querySelectorAll('.line-item-card')).map(card => ({
     quantityOrdered: number(card.querySelector('[name="quantityOrdered"]')?.value),
+    uom: normalizeUom(card.querySelector('[name="uom"]')?.value),
     itemPrice: number(card.querySelector('[name="itemPrice"]')?.value),
     itemTaxPercent: number(card.querySelector('[name="itemTaxPercent"]')?.value)
   }));
@@ -3214,6 +3577,7 @@ function collectPoFormPayload(existingPo = null) {
     return {
       itemDesc,
       quantityOrdered,
+      uom: normalizeUom(card.querySelector('[name="uom"]')?.value),
       itemPrice,
       itemTaxPercent,
       lineType
@@ -3251,6 +3615,7 @@ function collectPoFormPayload(existingPo = null) {
       itemPrice: line.itemPrice,
       itemDesc: line.itemDesc,
       quantityOrdered: line.quantityOrdered,
+      uom: normalizeUom(line.uom || 'Nos'),
       itemTax: line.itemTaxPercent ? `GST${line.itemTaxPercent}` : '',
       itemTaxPercent: line.itemTaxPercent,
       itemTaxAmount: line.itemTaxAmount,
@@ -3355,7 +3720,7 @@ function openProductDetailModal(poKey) {
       <div class="detail-card"><div class="k">PO Total</div><div class="v">${money(po.poTotal)}</div></div>
       <div class="detail-card"><div class="k">Amount Paid</div><div class="v">${money(po.amountPaid || 0)}</div></div>
       <div class="detail-card"><div class="k">Balance Due</div><div class="v">${money(po.balanceDue || 0)}</div></div>
-      <div class="detail-card"><div class="k">Payment</div><div class="v"><span class="badge ${badgeClass(po.paymentStatus)}">${escapeHtml(po.paymentStatus)}</span></div></div>
+      <div class="detail-card"><div class="k">Payment</div><div class="v">${renderPaymentProgress(po)}</div></div>
       <div class="detail-card"><div class="k">Delivery</div><div class="v"><span class="badge ${displayDeliveryBadgeClass(po)}">${escapeHtml(displayDeliveryStatus(po))}</span> <span class="small-text">${formatDate(po.deliveryDate)}</span></div></div>
     </div>
 
@@ -3372,8 +3737,8 @@ function openProductDetailModal(poKey) {
               <div class="metric-value">${money(item.lineGrandTotal)}</div>
             </div>
             <div class="meta-row">
-              <span>Total Qty ${formatNumber(item.quantityOrdered)}</span>
-              <span>Rate ${item.displayPrice}</span>
+              <span>Total Qty ${formatNumber(item.quantityOrdered)} ${escapeHtml(item.displayUom || 'Nos')}</span>
+              <span>Rate ${item.displayPrice}${item.displayUom && item.displayUom !== 'Mixed' ? ` / ${escapeHtml(item.displayUom)}` : ''}</span>
               <span>Tax ${escapeHtml(item.displayTaxPercent)}${item.displayTaxPercent === 'Mixed' ? '' : '%'}</span>
               <span>Item Total ${money(item.itemTotal)}</span>
               <span>Tax Amount ${money(item.itemTaxAmount)}</span>
@@ -3385,8 +3750,8 @@ function openProductDetailModal(poKey) {
                   <div class="detail-subline">
                     <div class="metric-subtle">Original line ${lineIndex + 1}</div>
                     <div class="meta-row">
-                      <span>Qty ${formatNumber(line.quantityOrdered)}</span>
-                      <span>Unit ${money(line.itemPrice)}</span>
+                      <span>Qty ${formatNumber(line.quantityOrdered)} ${escapeHtml(line.uom || 'Nos')}</span>
+                      <span>Unit ${money(line.itemPrice)}${line.uom ? ` / ${escapeHtml(line.uom)}` : ''}</span>
                       <span>Tax ${formatNumber(line.itemTaxPercent)}%</span>
                       <span>Line Total ${money(line.lineGrandTotal)}</span>
                     </div>
@@ -3412,8 +3777,8 @@ function openProductDetailModal(poKey) {
               <div class="metric-value">${money(item.lineGrandTotal)}</div>
             </div>
             <div class="meta-row">
-              <span>Qty ${formatNumber(item.quantityOrdered)}</span>
-              <span>Rate ${item.displayPrice}</span>
+              <span>Qty ${formatNumber(item.quantityOrdered)} ${escapeHtml(item.displayUom || 'Nos')}</span>
+              <span>Rate ${item.displayPrice}${item.displayUom && item.displayUom !== 'Mixed' ? ` / ${escapeHtml(item.displayUom)}` : ''}</span>
               <span>Tax ${escapeHtml(item.displayTaxPercent)}${item.displayTaxPercent === 'Mixed' ? '' : '%'}</span>
               <span>Charge Total ${money(item.itemTotal)}</span>
               <span>Tax Amount ${money(item.itemTaxAmount)}</span>
@@ -3765,6 +4130,12 @@ function bindGlobalEvents() {
     if (event.target.id === 'completeFollowupBackdrop') closeCompleteFollowupModal();
   });
   document.getElementById('completeFollowupForm')?.addEventListener('submit', completeFollowup);
+  document.getElementById('closeFollowupMailModalBtn')?.addEventListener('click', closeFollowupMailModal);
+  document.getElementById('cancelFollowupMailBtn')?.addEventListener('click', closeFollowupMailModal);
+  document.getElementById('followupMailBackdrop')?.addEventListener('click', event => {
+    if (event.target.id === 'followupMailBackdrop') closeFollowupMailModal();
+  });
+  document.getElementById('followupMailForm')?.addEventListener('submit', queueFollowupMail);
 
   document.getElementById('addLineBtn').addEventListener('click', () => {
     document.getElementById('poLineItems').appendChild(createLineItemCard({ quantityOrdered: 1, itemTaxPercent: 18 }));
@@ -3907,7 +4278,7 @@ function handlePoAction(event) {
     return;
   }
   if (action === 'send-followup-mail') {
-    alert('Send Mail will be enabled in the mailing module.');
+    openFollowupMailModal(button.dataset.followup || '', poKey);
     return;
   }
 }
@@ -3917,9 +4288,8 @@ async function init() {
   bindFilters();
   bindGlobalEvents();
   if (useSupabase) {
-    await loadRemoteStateFromSupabase();
-    await generateFollowupsForPOs(buildDerived().pos);
-    await loadRemoteStateFromSupabase();
+    await refreshStateFromSupabase({ generateFollowups: true });
+    return;
   }
   renderAll();
 }

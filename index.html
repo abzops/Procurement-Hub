@@ -226,7 +226,7 @@
           <div class="panel-header wrap">
             <div>
               <h2>Follow-ups</h2>
-              <p class="section-copy">One card per PO. Due and overdue follow-ups are highlighted in red.</p>
+              <p class="section-copy">Today's follow-ups and missed follow-ups. Missed follow-ups are tagged clearly.</p>
             </div>
             <div class="toolbar">
               <input class="control-input" id="followupDateFilter" type="date" />
@@ -463,6 +463,70 @@
         <div class="form-actions">
           <button type="button" class="ghost-btn" id="cancelCompleteFollowupBtn">Cancel</button>
           <button type="submit" class="primary-btn">Save Complete</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+
+  <div class="modal-backdrop hidden" id="followupMailBackdrop">
+    <div class="modal-shell modal-wide followup-mail-modal">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">VENDOR MAIL QUEUE</p>
+          <h3 id="followupMailTitle">Send Follow-up Mail</h3>
+          <p class="section-copy" id="followupMailSubtext">Review/edit the template. Zoho Flow will send the queued mail.</p>
+        </div>
+        <button class="icon-btn" id="closeFollowupMailModalBtn" type="button" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="followup-complete-context mail-context-grid">
+        <div><span>Stage</span><strong id="followupMailStage">—</strong></div>
+        <div><span>Required Action</span><strong id="followupMailAction">—</strong></div>
+        <div><span>Template</span><strong id="followupMailTemplate">—</strong></div>
+        <div><span>Delivery</span><strong id="followupMailDelivery">—</strong></div>
+      </div>
+
+      <form id="followupMailForm" class="modal-form followup-mail-form">
+        <input type="hidden" name="followupId" />
+        <input type="hidden" name="poKey" />
+        <input type="hidden" name="templateKey" />
+
+        <div class="form-grid two-col">
+          <label>
+            <span>To *</span>
+            <input name="to" type="email" placeholder="vendor@example.com" required />
+          </label>
+          <label>
+            <span>CC</span>
+            <input name="cc" type="text" placeholder="optional cc emails" />
+          </label>
+          <label>
+            <span>Queued by</span>
+            <input name="queuedBy" type="text" placeholder="e.g. Joseph" />
+          </label>
+          <label>
+            <span>Queue Status</span>
+            <input value="Pending - Zoho Flow will send" readonly />
+          </label>
+        </div>
+
+        <label>
+          <span>Subject *</span>
+          <input name="subject" type="text" required />
+        </label>
+        <label>
+          <span>Email Body *</span>
+          <textarea name="body" rows="14" required></textarea>
+        </label>
+
+        <div class="mail-note-box">
+          This does not send mail directly from the app. It creates a <strong>Pending</strong> row in <strong>vendor_email_queue</strong>. Zoho Flow sends it and updates the status.
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="ghost-btn" id="cancelFollowupMailBtn">Cancel</button>
+          <button type="submit" class="primary-btn">Queue Mail</button>
         </div>
       </form>
     </div>
