@@ -921,3 +921,11 @@ label span{font-size:12px;color:var(--muted)}
 .payment-progress.payment-pending .payment-progress-head span{color:var(--muted)}
 .detail-card .payment-progress{max-width:none}
 @media (max-width:960px){.payment-progress{max-width:none}}
+
+.field-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted, #9ca3af);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}

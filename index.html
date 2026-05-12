@@ -448,6 +448,18 @@
           <label>
             <span>Next follow-up date</span>
             <input name="nextFollowupDate" type="date" />
+            <small class="field-hint">If blank and this PO is delayed, tomorrow's follow-up will be created automatically.</small>
+          </label>
+          <label>
+            <span>Close follow-up cycle</span>
+            <select name="closeReason">
+              <option value="">Keep follow-up active</option>
+              <option value="Delivered">Delivered</option>
+              <option value="PO Cancelled">PO Cancelled</option>
+              <option value="No Further Follow-up Required">No Further Follow-up Required</option>
+              <option value="Duplicate PO">Duplicate PO</option>
+              <option value="Wrong Entry">Wrong Entry</option>
+            </select>
           </label>
         </div>
 
