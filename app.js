@@ -1872,7 +1872,7 @@ function isAcknowledgementFollowup(row = {}) {
   const stage = normalizeKey(row.followup_stage || row.label || '');
   const key = normalizeKey(row.followup_key || row.key || '');
   const activity = normalizeKey(row.followup_activity || row.activity || '');
-  return stage.includes('0%')
+  return /^0\s*%/.test(stage)
     || stage.includes('ACKNOWLEDGEMENT')
     || stage.includes('ACKNOWLEDGMENT')
     || key.endsWith('_0')
@@ -1898,8 +1898,11 @@ function getCurrentFollowupForPo(po, asOfDate = todayDateOnly()) {
     const eligible = rules.filter(item => !item.delay && leadTimePercent >= item.percent);
     rule = eligible[eligible.length - 1] || null;
   }
-  if (!rule || Number(rule.percent) <= 0 || normalizeKey(rule.label).includes('0%')) return null;
-  const dueDate = rule.delay ? deliveryDate : addDays(poDate, Math.round(leadTimeDays * (rule.percent / 100)));
+  if (!rule || Number(rule.percent) <= 0 || /^0\s*%/.test(normalizeKey(rule.label))) return null;
+  // For delayed POs, follow-up is a continuous daily cycle.
+  // The card should be due on the selected/current date, not stuck on the original delivery date.
+  const dueDate = rule.delay ? asOfDate : addDays(poDate, Math.round(leadTimeDays * (rule.percent / 100)));
+  const followupType = rule.delay ? 'Daily Delay Follow-up' : 'Lead Time Follow-up';
   return {
     po_number: po.poNumber,
     vendor_name: po.vendorName,
@@ -1917,9 +1920,15 @@ function getCurrentFollowupForPo(po, asOfDate = todayDateOnly()) {
     priority: rule.delay ? 'High' : (rule.percent >= 95 ? 'High' : (rule.percent >= 75 ? 'Medium' : 'Low')),
     email_status: 'Not Sent',
     call_status: rule.method.toLowerCase().includes('call') ? 'Pending' : 'Not Required',
+    followup_type: followupType,
     poKey: po.poKey,
     isVirtual: true
   };
+}
+
+
+function makeFollowupTaskKey(row = {}) {
+  return `${cleanText(row.po_number || row.poNumber)}__${cleanText(row.followup_stage || row.label)}__${safeDate(row.due_date || row.dueDate)}`;
 }
 
 async function generateFollowupsForPOs(pos = []) {
@@ -1933,12 +1942,18 @@ async function generateFollowupsForPOs(pos = []) {
   try {
     const { data: existing, error: existingError } = await supabaseClient
       .from('po_followups')
-      .select('po_number, followup_stage');
+      .select('po_number, followup_stage, due_date, status, followup_type');
     if (existingError) throw existingError;
 
-    const existingKeys = new Set((existing || []).map(row => `${cleanText(row.po_number)}__${cleanText(row.followup_stage)}`));
+    const existingRows = existing || [];
+    const existingKeys = new Set(existingRows.map(row => makeFollowupTaskKey(row)));
+    const activePendingByPo = new Set(existingRows
+      .filter(row => !normalizeKey(row.status || 'Pending').includes('COMPLETE'))
+      .map(row => cleanText(row.po_number))
+      .filter(Boolean));
     const payload = candidates
-      .filter(row => !existingKeys.has(`${cleanText(row.po_number)}__${cleanText(row.followup_stage)}`))
+      .filter(row => !existingKeys.has(makeFollowupTaskKey(row)))
+      .filter(row => !activePendingByPo.has(cleanText(row.po_number)))
       .map(row => ({
         po_number: row.po_number,
         vendor_name: row.vendor_name,
@@ -1953,19 +1968,33 @@ async function generateFollowupsForPOs(pos = []) {
         status: row.status,
         priority: toDbFollowupPriority(row.priority),
         email_status: row.email_status,
-        call_status: row.call_status
+        call_status: row.call_status,
+        followup_type: row.followup_type || 'Lead Time Follow-up'
       }));
 
     if (payload.length) {
-      const { error } = await supabaseClient.from('po_followups').insert(payload);
-      if (error) throw error;
+      const firstInsert = await supabaseClient.from('po_followups').insert(payload);
+      if (firstInsert.error) {
+        const message = String(firstInsert.error.message || '');
+        if (message.includes('followup_type')) {
+          const fallbackPayload = payload.map(row => {
+            const copy = { ...row };
+            delete copy.followup_type;
+            return copy;
+          });
+          const retryInsert = await supabaseClient.from('po_followups').insert(fallbackPayload);
+          if (retryInsert.error) throw retryInsert.error;
+        } else {
+          throw firstInsert.error;
+        }
+      }
       const events = payload.map(row => ({
         po_number: row.po_number,
         event_type: 'followup_generated',
         event_title: 'Follow-up Generated',
         event_description: `${row.followup_stage}: ${row.followup_activity}`,
         actor_name: 'Procurement Hub',
-        metadata: { material_type: row.material_type, due_date: row.due_date }
+        metadata: { material_type: row.material_type, due_date: row.due_date, followup_type: row.followup_type || 'Lead Time Follow-up' }
       }));
       await supabaseClient.from('po_activity_events').insert(events);
     }
@@ -1990,6 +2019,8 @@ function enrichFollowupRowForCard(row, po = {}) {
     productCount: po.productCount || po.itemCount || row.productCount || 0,
     po_delivery_date: po.deliveryDate || row.po_delivery_date || row.delivery_date || '',
     latestUpdate: row.latest_update || row.completion_note || row.notes || row.latestUpdate || '',
+    followup_type: row.followup_type || row.type || 'Lead Time Follow-up',
+    close_reason: row.close_reason || '',
     isVirtual: Boolean(row.isVirtual)
   };
 }
@@ -2003,7 +2034,7 @@ function buildFollowupCards(pos = []) {
     .map(row => enrichFollowupRowForCard(row, poMap.get(cleanText(row.po_number)) || {}));
 
   const persistedByPoStage = new Map(persisted.map(row => [
-    `${cleanText(row.po_number)}__${cleanText(row.followup_stage)}`,
+    makeFollowupTaskKey(row),
     row
   ]));
 
@@ -2032,18 +2063,33 @@ function buildFollowupCards(pos = []) {
     }
   };
 
+  const activeFutureScheduledByPo = new Set(persisted
+    .filter(row => !normalizeKey(row.status || 'Pending').includes('COMPLETE'))
+    .filter(row => {
+      const type = normalizeKey(row.followup_type || '');
+      const due = parseDateOnly(row.due_date);
+      // Only a user-selected Scheduled Follow-up in the future should suppress
+      // automatic lead-time/daily-delay cards. Existing Daily Delay rows must
+      // not hide today's lead-time follow-up for non-delayed POs.
+      return type.includes('SCHEDULED') && due && selectedDate && due > selectedDate;
+    })
+    .map(row => cleanText(row.po_number))
+    .filter(Boolean));
+
   // Main rule: for every active non-delivered PO, show the current follow-up
-  // when it is due today or already missed. This fixes cases like STJ's PO:
-  // delivery date is today, so the 100% follow-up must appear today.
+  // when it is due today or already missed. If the user already scheduled the
+  // next follow-up for a future date, do not show that PO before the scheduled date.
   (pos || []).forEach(po => {
     if (!po || normalizeDeliveryStatus(po.deliveryStatus) === 'Delivered') return;
+    const poNumberForSchedule = cleanText(po.poNumber);
+    if (activeFutureScheduledByPo.has(poNumberForSchedule)) return;
     const current = getCurrentFollowupForPo(po, selectedDate);
     if (!current || isAcknowledgementFollowup(current)) return;
     const dueDate = parseDateOnly(current.due_date);
     if (!dueDate || !selectedDate || dueDate > selectedDate) return;
     const poNumber = cleanText(current.po_number || po.poNumber);
     const stage = cleanText(current.followup_stage);
-    const persistedMatch = persistedByPoStage.get(`${poNumber}__${stage}`);
+    const persistedMatch = persistedByPoStage.get(makeFollowupTaskKey(current));
     addVisible(persistedMatch || current, po);
   });
 
@@ -2228,6 +2274,7 @@ function renderFollowups({ pos }) {
           <strong>${escapeHtml(card.followup_activity || 'Follow up with vendor')}</strong>
         </div>
         <div class="followup-meta-grid">
+          <div><span>Type</span><strong>${escapeHtml(getFollowupTypeLabel(card))}</strong></div>
           <div><span>Communication</span><strong>${escapeHtml(card.communication_method || '—')}</strong></div>
           <div><span>Email</span><strong>${escapeHtml(card.email_status || 'Not Sent')}</strong></div>
           <div><span>Call</span><strong>${escapeHtml(card.call_status || 'Not Required')}</strong></div>
@@ -2235,7 +2282,7 @@ function renderFollowups({ pos }) {
         </div>
         <div class="followup-latest">
           <span>Latest Update</span>
-          <p>${escapeHtml(card.latestUpdate || (card.isVirtual ? 'Pending DB sync. Save/sync once to persist this task.' : 'No update added yet.'))}</p>
+          <p>${escapeHtml(card.latestUpdate || (card.isVirtual ? 'Generated from current PO status. Complete or sync to persist this task.' : 'No update added yet.'))}</p>
         </div>
         <div class="inline-actions followup-actions">
           <button class="ghost-btn small-btn" data-action="view-products" data-po="${escapeHtml(card.poKey || card.po_number)}">View PO</button>
@@ -2273,12 +2320,14 @@ async function ensureFollowupPersisted(card) {
     return localRow;
   }
 
-  const matchQuery = await supabaseClient
+  let existingFollowupQuery = supabaseClient
     .from('po_followups')
     .select('*')
     .eq('po_number', card.po_number)
-    .eq('followup_stage', card.followup_stage)
-    .maybeSingle();
+    .eq('followup_stage', card.followup_stage);
+  const cardDueDate = safeDate(card.due_date);
+  if (cardDueDate) existingFollowupQuery = existingFollowupQuery.eq('due_date', cardDueDate);
+  const matchQuery = await existingFollowupQuery.limit(1).maybeSingle();
 
   if (matchQuery.error && matchQuery.error.code !== 'PGRST116') throw matchQuery.error;
   if (matchQuery.data) return matchQuery.data;
@@ -2297,18 +2346,143 @@ async function ensureFollowupPersisted(card) {
     status: 'Pending',
     priority: toDbFollowupPriority(card.priority || 'Normal'),
     email_status: cleanText(card.email_status || 'Not Sent'),
-    call_status: cleanText(card.call_status || 'Not Required')
+    call_status: cleanText(card.call_status || 'Not Required'),
+    followup_type: card.followup_type || 'Lead Time Follow-up'
   };
 
-  const { data, error } = await supabaseClient
-    .from('po_followups')
-    .insert(payload)
-    .select('*')
-    .single();
-
-  if (error) throw error;
+  const data = await insertFollowupRow(payload);
   state.followups = [...(state.followups || []).filter(item => cleanText(item.id) !== cleanText(data.id)), data];
   return data;
+}
+
+
+function getFollowupTypeLabel(card = {}) {
+  const raw = cleanText(card.followup_type || card.type || '');
+  const stage = normalizeKey(card.followup_stage || '');
+  const activity = normalizeKey(card.followup_activity || '');
+  const rawKey = normalizeKey(raw);
+  if (rawKey.includes('SCHEDULED')) return raw || 'Scheduled Follow-up';
+  if (rawKey.includes('DAILY DELAY') || stage.includes('DELAY') || activity.includes('DELAY')) return 'Daily Delay Follow-up';
+  if (rawKey.includes('MANUAL')) return 'Manual Follow-up';
+  return raw || 'Lead Time Follow-up';
+}
+
+
+function isDelayedFollowupContext(card = {}, po = {}, asOfDate = todayDateOnly()) {
+  const stage = normalizeKey(card.followup_stage || '');
+  const activity = normalizeKey(card.followup_activity || '');
+  const type = normalizeKey(card.followup_type || '');
+  const deliveryStatus = normalizeDeliveryStatus(po?.deliveryStatus || card.delivery_status || '');
+  const deliveryDate = parseDateOnly(po?.deliveryDate || card.po_delivery_date || card.delivery_date || '');
+  return deliveryStatus === 'Delayed'
+    || stage.includes('DELAY')
+    || type.includes('DELAY')
+    || activity.includes('DELAY')
+    || Boolean(deliveryDate && asOfDate && deliveryDate < asOfDate);
+}
+
+function buildNextFollowupCandidate({ persisted = {}, card = {}, po = {}, completion = {} } = {}) {
+  const poNumber = cleanText(persisted.po_number || card.po_number || po.poNumber);
+  if (!poNumber) return null;
+  if (isFollowupCycleClosed(po, completion.closeReason)) return null;
+
+  const selectedNextDate = parseDateOnly(completion.nextFollowupDate);
+  const completedDate = parseDateOnly(completion.completedAt) || todayDateOnly();
+  const delayedContext = isDelayedFollowupContext(card, po, completedDate);
+  let dueDate = null;
+  let followupType = '';
+  let stage = '';
+  let activity = '';
+  let priority = 'Normal';
+  let method = card.communication_method || 'Call + Email';
+
+  if (selectedNextDate) {
+    dueDate = selectedNextDate;
+    followupType = 'Scheduled Follow-up';
+    stage = delayedContext ? 'Scheduled Delay Follow-up' : 'Scheduled Follow-up';
+    activity = 'Follow up as per the next follow-up date committed during the previous update.';
+    priority = delayedContext ? 'High' : 'Normal';
+  } else if (delayedContext) {
+    dueDate = addDays(completedDate, 1);
+    followupType = 'Daily Delay Follow-up';
+    stage = 'Daily Delay Follow-up';
+    activity = 'Daily delay follow-up until material is received or a revised next follow-up date is set.';
+    priority = 'High';
+    method = 'Mandatory Call + Email';
+  } else {
+    return null;
+  }
+
+  return {
+    po_number: poNumber,
+    vendor_name: persisted.vendor_name || card.vendor_name || po.vendorName || 'Unknown Vendor',
+    vendor_email: persisted.vendor_email || card.vendor_email || po.vendorEmail || state.vendorContacts?.[po.vendorName]?.email || null,
+    vendor_phone: persisted.vendor_phone || card.vendor_phone || po.vendorPhone || state.vendorContacts?.[po.vendorName]?.phone || null,
+    material_type: normalizeMaterialType(persisted.material_type || card.material_type || po.materialType || 'Unknown'),
+    followup_stage: stage,
+    lead_time_percent: persisted.lead_time_percent == null ? (card.lead_time_percent == null ? null : Number(card.lead_time_percent)) : Number(persisted.lead_time_percent),
+    followup_activity: activity,
+    communication_method: method,
+    due_date: dateToIso(dueDate),
+    status: 'Pending',
+    priority: toDbFollowupPriority(priority),
+    email_status: 'Not Sent',
+    call_status: method.toLowerCase().includes('call') ? 'Pending' : 'Not Required',
+    followup_type: followupType,
+    parent_followup_id: cleanText(persisted.id || card.id) || null
+  };
+}
+
+async function insertFollowupRow(payload) {
+  if (!useSupabase) return null;
+  const first = await supabaseClient.from('po_followups').insert(payload).select('*').single();
+  if (!first.error) return first.data;
+  const message = String(first.error.message || '');
+  const optionalColumns = ['followup_type', 'parent_followup_id', 'close_reason'];
+  if (!optionalColumns.some(column => message.includes(column))) throw first.error;
+  const fallbackPayload = { ...payload };
+  optionalColumns.forEach(column => delete fallbackPayload[column]);
+  const second = await supabaseClient.from('po_followups').insert(fallbackPayload).select('*').single();
+  if (second.error) throw second.error;
+  return second.data;
+}
+
+async function createNextFollowupAfterCompletion({ persisted = {}, card = {}, po = {}, completion = {} } = {}) {
+  const nextPayload = buildNextFollowupCandidate({ persisted, card, po, completion });
+  if (!nextPayload) return null;
+
+  if (!useSupabase) {
+    const localRow = { ...nextPayload, id: uid('followup'), created_at: new Date().toISOString(), isVirtual: false };
+    state.followups.push(localRow);
+    return localRow;
+  }
+
+  const { data: existing, error: existingError } = await supabaseClient
+    .from('po_followups')
+    .select('*')
+    .eq('po_number', nextPayload.po_number)
+    .eq('due_date', nextPayload.due_date)
+    .eq('status', 'Pending')
+    .limit(1)
+    .maybeSingle();
+  if (existingError && existingError.code !== 'PGRST116') throw existingError;
+  if (existing) return existing;
+
+  const inserted = await insertFollowupRow(nextPayload);
+  await insertPoActivityEvent({
+    po_number: nextPayload.po_number,
+    event_type: 'followup_generated',
+    event_title: nextPayload.followup_type || 'Follow-up Generated',
+    event_description: `${nextPayload.followup_stage}: ${nextPayload.followup_activity}`,
+    actor: 'Procurement Hub',
+    metadata: {
+      material_type: nextPayload.material_type,
+      due_date: nextPayload.due_date,
+      followup_type: nextPayload.followup_type,
+      parent_followup_id: nextPayload.parent_followup_id
+    }
+  });
+  return inserted;
 }
 
 function openCompleteFollowupModal(followupId, poKey) {
@@ -2329,6 +2503,7 @@ function openCompleteFollowupModal(followupId, poKey) {
   form.elements.edd.value = safeDate(po?.edd || card.edd || '') || '';
   form.elements.delayReason.value = cleanText(po?.delayReason || card.delay_reason || '');
   form.elements.nextFollowupDate.value = '';
+  if (form.elements.closeReason) form.elements.closeReason.value = '';
 
   document.getElementById('completeFollowupTitle').textContent = `Complete ${card.po_number || poKey}`;
   document.getElementById('completeFollowupSubtext').textContent = `${card.vendor_name || po?.vendorName || 'Vendor'} • ${card.followup_stage || 'Follow-up'}`;
@@ -2354,7 +2529,8 @@ function applyFollowupCompletionLocally(followupRow, completion) {
     completed_at: completion.completedAt,
     completed_by: completion.doneBy,
     call_status: completion.callStatus,
-    notes: completion.updateReceived || completion.notes || followupRow.notes || ''
+    notes: completion.updateReceived || completion.notes || followupRow.notes || '',
+    close_reason: completion.closeReason || followupRow.close_reason || ''
   };
 
   state.followups = (state.followups || []).filter(item => {
@@ -2431,6 +2607,7 @@ async function completeFollowup(event) {
   const edd = safeDate(form.elements.edd.value);
   const delayReason = cleanText(form.elements.delayReason.value);
   const nextFollowupDate = safeDate(form.elements.nextFollowupDate.value);
+  const closeReason = cleanText(form.elements.closeReason?.value || '');
   const notes = cleanText(form.elements.notes.value);
 
   if (!doneBy) {
@@ -2466,6 +2643,7 @@ async function completeFollowup(event) {
       edd,
       delayReason,
       nextFollowupDate,
+      closeReason,
       notes,
       completedAt,
       callStatus
@@ -2478,6 +2656,7 @@ async function completeFollowup(event) {
         completed_by: doneBy,
         call_status: callStatus,
         notes: updateReceived || notes || null,
+        close_reason: closeReason || null,
         updated_at: completedAt
       };
       const { error: followupError } = await supabaseClient
@@ -2497,6 +2676,7 @@ async function completeFollowup(event) {
         edd: edd || null,
         delay_reason: delayReason || null,
         next_followup_date: nextFollowupDate || null,
+        close_reason: closeReason || null,
         notes: notes || null
       };
       const { error: logError } = await supabaseClient.from('po_followup_logs').insert(logPayload);
@@ -2526,9 +2706,22 @@ async function completeFollowup(event) {
           communication_method: completionMethod,
           edd,
           delay_reason: delayReason,
-          next_followup_date: nextFollowupDate
+          next_followup_date: nextFollowupDate,
+          close_reason: closeReason
         }
       });
+
+      const nextFollowup = await createNextFollowupAfterCompletion({ persisted, card, po: context.po, completion });
+      if (nextFollowup) {
+        const nextDate = safeDate(nextFollowup.due_date);
+        await supabaseClient
+          .from('po_followup_logs')
+          .update({ created_next_followup_date: nextDate || null })
+          .eq('followup_id', followupId)
+          .eq('po_number', poNumber);
+      }
+    } else {
+      await createNextFollowupAfterCompletion({ persisted: { ...persisted, ...card }, card, po: context.po, completion });
     }
 
     applyFollowupCompletionLocally({ ...persisted, ...card }, completion);
@@ -3022,7 +3215,9 @@ function renderPurchaseOrders({ pos }) {
   const vendors = ['all', ...new Set(pos.map(po => po.vendorName).filter(Boolean))].sort();
   const paymentStatuses = ['all', ...new Set(pos.map(po => paymentProgressStatus(po)).filter(Boolean))];
   const poStatuses = ['all', ...new Set(pos.map(po => po.poStatus).filter(Boolean))];
-  const deliveryStatuses = ['all', ...new Set(pos.map(displayDeliveryStatus).filter(Boolean))];
+  const baseDeliveryStatuses = ['Unknown', 'In Transit', 'Partially Delivered', 'Delivered', 'Delayed'];
+  const dynamicDeliveryStatuses = pos.map(displayDeliveryStatus).filter(Boolean);
+  const deliveryStatuses = ['all', ...baseDeliveryStatuses.filter(v => dynamicDeliveryStatuses.includes(v) || v === 'In Transit' || v === 'Unknown' || v === 'Partially Delivered' || v === 'Delivered' || v === 'Delayed')];
   const selectedDeliveryFilter = deliveryStatuses.includes(state.filters.poDelivery) ? state.filters.poDelivery : 'all';
   state.filters.poDelivery = selectedDeliveryFilter;
 
