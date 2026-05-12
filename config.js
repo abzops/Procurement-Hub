@@ -11,4 +11,13 @@ window.SNS_CONFIG = {
   queuePoNumberColumn: "po_number",
   queueSourceColumn: "source",
   queueBatchSize: 20,
+
+  // Follow-up mail defaults
+  followupMailFrom: "sourcing@stacknstock.in",
+
+  // Zoho Flow webhook trigger for vendor follow-up mails.
+  // Keep disabled until the webhook is created/tested in Zoho Flow.
+  followupMailWebhookEnabled: false,
+  followupMailWebhookUrl: "",
+  followupMailWebhookMode: "json",
 };
