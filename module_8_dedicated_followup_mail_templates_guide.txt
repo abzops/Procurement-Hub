@@ -1,0 +1,19 @@
+Module 8 - Dedicated follow-up mail templates
+
+What this update fixes:
+- Send Mail no longer uses the same generic template for every follow-up.
+- Separate templates are used for RTO 50/75/95/100/Delay.
+- Separate templates are used for MTO 25/50/75/90/95/100/Delay.
+- Scheduled Follow-up and Daily Delay Follow-up have separate templates.
+- Vendor email auto-fetches from follow-up row, PO row, then vendor contact email.
+- Default from/sender email is sourcing@stacknstock.in.
+- Queue status remains Pending for Zoho Flow.
+- Optional Zoho Flow webhook can be enabled in config.js.
+
+Config keys:
+followupMailFrom: "sourcing@stacknstock.in"
+followupMailWebhookEnabled: false
+followupMailWebhookUrl: ""
+followupMailWebhookMode: "json"
+
+Keep webhook disabled until Zoho Flow is ready.
