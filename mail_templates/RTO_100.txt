@@ -1,0 +1,27 @@
+Subject: RTO delivery-day status confirmation required: PO {{po_number}} - {{followup_stage}}
+
+Dear {{vendor_name}},
+
+This is the 100% RTO follow-up. Please confirm delivery-day dispatch / delivery status.
+
+PO Details:
+- PO Number: {{po_number}}
+- Material Type: {{material_type}}
+- Follow-up Stage: {{followup_stage}}
+- Required Update: {{followup_activity}}
+- Communication Method: {{communication_method}}
+- PO Date: {{po_date}}
+- Delivery Date: {{delivery_date}}
+- Follow-up Due Date: {{followup_due_date}}
+
+Please confirm:
+- Current status
+- Dispatch / production plan
+- Expected delivery timeline
+- Any issue or delay reason
+- Revised EDD, if applicable
+
+Kindly reply with the latest update at the earliest.
+
+Regards,
+Stack n Stock Procurement Team
