@@ -1,0 +1,43 @@
+MODULE 10 - TXT MAIL TEMPLATES
+
+Purpose:
+- Keep vendor follow-up mail templates outside app.js.
+- Edit templates as .txt files under mail_templates/.
+- App automatically loads mail_templates/<template_key>.txt when Send Mail is opened.
+- User can also import any .txt template from the Send Mail popup.
+
+Template file format:
+Subject: Vendor Follow-up Required: PO {{po_number}} - {{followup_stage}}
+
+Dear {{vendor_name}},
+
+Your message body here.
+
+Supported placeholders:
+{{vendor_name}}
+{{po_number}}
+{{material_type}}
+{{followup_stage}}
+{{followup_activity}}
+{{communication_method}}
+{{po_date}}
+{{delivery_date}}
+{{followup_due_date}}
+{{edd}}
+{{from_email}}
+{{queued_by}}
+{{template_key}}
+
+Zoho Flow:
+- Send Email body should use Fetch row -> body_html.
+- Set Zoho body/message type to HTML if option appears.
+- Do not use Fetch row -> body for the actual sent mail, unless you want plain text.
+
+Safe editing:
+- Change the .txt file wording only.
+- Do not rename template files unless you also update app template keys.
+
+Commit guide:
+git add app.js index.html styles.css mail_templates module_10_txt_mail_templates.sql module_10_txt_mail_templates_guide.txt
+git commit -m "Add TXT-based vendor follow-up mail templates"
+git push origin HEAD:module-10-txt-mail-templates

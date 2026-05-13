@@ -1,0 +1,83 @@
+MODULE 9 - ZOHO FLOW STRUCTURED EMAIL FIX
+
+Goal:
+Make vendor follow-up mails structured even if plain-text body formatting is lost.
+
+Important setup:
+1. Supabase Database Webhook should be on vendor_email_queue INSERT only.
+2. In local config.js set followupMailWebhookEnabled: false to avoid duplicate sends.
+3. Zoho Flow should be: Row added -> Fetch row -> Send email -> Update row(s).
+
+Supabase SQL:
+Run module_9_flow_side_html_template_fix.sql once.
+
+Zoho Mail - Send email mapping:
+From address:
+  sourcing@stacknstock.in
+
+Reply to:
+  sourcing@stacknstock.in
+
+To:
+  Fetch row -> vendor_email
+
+CC:
+  Fetch row -> cc_email
+
+Subject:
+  Fetch row -> subject
+
+Body option A - preferred:
+  Fetch row -> body_html
+  If Zoho Mail asks body type/content type, select HTML.
+
+Body option B - if body_html still renders poorly:
+Paste this HTML in the Body field and replace placeholders by clicking variables from Fetch row.
+
+<div style="font-family: Arial, sans-serif; font-size: 14px; color: #222; line-height: 1.6;">
+  <p>Dear ${vendor_name},</p>
+  <p>This is a vendor follow-up for the below purchase order.</p>
+  <table style="border-collapse: collapse; width: 100%; max-width: 720px; margin: 16px 0;">
+    <tr><td style="border: 1px solid #ddd; padding: 8px; font-weight: bold; background: #f7f7f7;">PO Number</td><td style="border: 1px solid #ddd; padding: 8px;">${po_number}</td></tr>
+    <tr><td style="border: 1px solid #ddd; padding: 8px; font-weight: bold; background: #f7f7f7;">Material Type</td><td style="border: 1px solid #ddd; padding: 8px;">${material_type}</td></tr>
+    <tr><td style="border: 1px solid #ddd; padding: 8px; font-weight: bold; background: #f7f7f7;">Follow-up Stage</td><td style="border: 1px solid #ddd; padding: 8px;">${followup_stage}</td></tr>
+    <tr><td style="border: 1px solid #ddd; padding: 8px; font-weight: bold; background: #f7f7f7;">Required Action</td><td style="border: 1px solid #ddd; padding: 8px;">${followup_activity}</td></tr>
+    <tr><td style="border: 1px solid #ddd; padding: 8px; font-weight: bold; background: #f7f7f7;">Communication</td><td style="border: 1px solid #ddd; padding: 8px;">${communication_method}</td></tr>
+  </table>
+  <p><strong>Please confirm the following:</strong></p>
+  <ul>
+    <li>Current order readiness / production status</li>
+    <li>Dispatch plan or current dispatch status</li>
+    <li>Expected delivery timeline</li>
+    <li>Reason for delay, if any</li>
+    <li>Revised estimated delivery date, if applicable</li>
+  </ul>
+  <p>Please reply with the latest update at the earliest.</p>
+  <p>Regards,<br><strong>Stack n Stock Procurement Team</strong></p>
+</div>
+
+Replace placeholders:
+${vendor_name} -> Fetch row -> vendor_name
+${po_number} -> Fetch row -> po_number
+${material_type} -> Fetch row -> material_type
+${followup_stage} -> Fetch row -> followup_stage
+${followup_activity} -> Fetch row -> followup_activity
+${communication_method} -> Fetch row -> communication_method
+
+After send email success:
+Update vendor_email_queue:
+  status = Sent
+  sent_at = current datetime
+  last_attempt_at = current datetime
+  error_message = blank
+
+Update po_followups:
+  email_status = Sent
+  updated_at = current datetime
+
+Test:
+1. Replace files.
+2. Run SQL.
+3. Hard refresh Procurement Hub.
+4. Queue a new follow-up mail.
+5. Zoho Flow should send structured email.

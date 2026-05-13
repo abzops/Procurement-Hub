@@ -181,6 +181,9 @@ const queueConfig = {
   sourceColumn: cleanConfigText(snsConfig.queueSourceColumn) || 'source',
   batchSize: Number.isFinite(Number(snsConfig.queueBatchSize)) ? Math.max(1, Number(snsConfig.queueBatchSize)) : 20
 };
+const followupMailConfig = {
+  fromEmail: cleanConfigText(snsConfig.followupMailFrom) || 'sourcing@stacknstock.in'
+};
 let remoteSyncTimer = null;
 let remoteSyncInFlight = false;
 let queueProcessingInFlight = false;
@@ -2381,6 +2384,22 @@ function isDelayedFollowupContext(card = {}, po = {}, asOfDate = todayDateOnly()
     || Boolean(deliveryDate && asOfDate && deliveryDate < asOfDate);
 }
 
+
+function isFollowupCycleClosed(po = {}, closeReason = '') {
+  const reason = normalizeKey(closeReason || '');
+  if (reason) {
+    return [
+      'DELIVERED',
+      'PO CANCELLED',
+      'NO FURTHER FOLLOW-UP REQUIRED',
+      'DUPLICATE PO',
+      'WRONG ENTRY'
+    ].includes(reason);
+  }
+  const deliveryStatus = normalizeDeliveryStatus(po?.deliveryStatus || po?.delivery_status || '');
+  return deliveryStatus === 'Delivered';
+}
+
 function buildNextFollowupCandidate({ persisted = {}, card = {}, po = {}, completion = {} } = {}) {
   const poNumber = cleanText(persisted.po_number || card.po_number || po.poNumber);
   if (!poNumber) return null;
@@ -2741,64 +2760,134 @@ async function completeFollowup(event) {
 }
 
 
-function getFollowupTemplateKey(card, po) {
+function getFollowupTemplateKey(card = {}, po = {}) {
   const material = normalizeMaterialType(card?.material_type || po?.materialType || 'Unknown');
-  const stage = normalizeKey(card?.followup_key || card?.followup_stage || 'FOLLOWUP');
-  return `${material}_${stage || 'FOLLOWUP'}`;
+  const followupKey = normalizeKey(card?.followup_key || '');
+  const stageKey = normalizeKey(card?.followup_stage || '');
+  const typeKey = normalizeKey(card?.followup_type || '');
+  const activityKey = normalizeKey(card?.followup_activity || '');
+
+  if (typeKey.includes('SCHEDULED')) return 'SCHEDULED_FOLLOWUP';
+  if (typeKey.includes('DAILY DELAY') || stageKey.includes('DELAY') || activityKey.includes('DELAY')) return 'DAILY_DELAY';
+  if (/^(RTO|MTO|UNKNOWN)_(25|50|75|90|95|100|DELAY)$/.test(followupKey)) return followupKey;
+  const percentMatch = stageKey.match(/(^|[^0-9])(25|50|75|90|95|100)(%|[^0-9]|$)/);
+  if (percentMatch) return `${material}_${percentMatch[2]}`;
+  return 'DEFAULT';
 }
 
-function buildFollowupMailTemplate(card, po) {
-  const poNumber = cleanText(card?.po_number || po?.poNumber || '');
+function getTemplateContext(card = {}, po = {}, extra = {}) {
   const vendorName = cleanText(card?.vendor_name || po?.vendorName || 'Vendor');
+  const poNumber = cleanText(card?.po_number || po?.poNumber || '');
   const materialType = normalizeMaterialType(card?.material_type || po?.materialType || 'Unknown');
-  const stage = cleanText(card?.followup_stage || 'Vendor Follow-up');
-  const activity = cleanText(card?.followup_activity || 'Please confirm current PO status and delivery timeline.');
-  const communication = cleanText(card?.communication_method || 'Email');
+  const followupStage = cleanText(card?.followup_stage || 'Vendor Follow-up');
+  const followupActivity = cleanText(card?.followup_activity || 'Please confirm current PO status and delivery timeline.');
+  const communicationMethod = cleanText(card?.communication_method || 'Email');
+  const poDate = formatDate(po?.poDate || card?.po_date || '');
   const deliveryDate = formatDate(po?.deliveryDate || card?.po_delivery_date || '');
-  const followupDue = formatDate(card?.due_date || '');
+  const followupDueDate = formatDate(card?.due_date || '');
   const edd = formatDate(po?.edd || card?.edd || '');
-  const isDelay = normalizeKey(stage).includes('DELAY') || normalizeKey(activity).includes('DELAY');
-  const isMto = materialType === 'MTO';
-  const isRto = materialType === 'RTO';
-  const subjectPrefix = isDelay ? 'Delay Follow-up Required' : 'Vendor Follow-up Required';
-  const subject = `${subjectPrefix}: PO ${poNumber} - ${stage}`;
-  const stageLine = isMto
-    ? 'This is an MTO follow-up. Please share the current production/manufacturing status clearly.'
-    : isRto
-      ? 'This is an RTO follow-up. Please confirm readiness, dispatch, and delivery status clearly.'
-      : 'This is a PO follow-up. Please confirm the latest status clearly.';
-  const delayAsk = isDelay
-    ? '\nSince the PO is delayed, please share:\n- reason for delay\n- revised estimated delivery date\n- dispatch status\n- expected arrival date\n'
-    : '';
-  const body = [
-    `Dear ${vendorName},`,
-    '',
-    `This is a follow-up for PO ${poNumber}.`,
-    stageLine,
-    '',
-    `Follow-up Stage: ${stage}`,
-    `Required Update: ${activity}`,
-    `Communication Method: ${communication}`,
-    '',
-    `PO Date: ${formatDate(po?.poDate || card?.po_date || '')}`,
-    `Original Delivery Date: ${deliveryDate}`,
-    `Follow-up Due Date: ${followupDue}`,
-    edd !== '—' ? `Current EDD: ${edd}` : '',
-    delayAsk,
-    'Please reply with the latest status and expected delivery timeline.',
-    '',
-    'Regards,',
-    'Stack n Stock Procurement Team'
-  ].filter(line => line !== '').join('\n');
-  return { subject, body, templateKey: getFollowupTemplateKey(card, po) };
+  const templateKey = cleanText(extra.templateKey || getFollowupTemplateKey(card, po));
+  const fromEmail = cleanText(extra.fromEmail || followupMailConfig.fromEmail || 'sourcing@stacknstock.in');
+  const queuedBy = cleanText(extra.queuedBy || '');
+  return {
+    vendor_name: vendorName,
+    po_number: poNumber,
+    material_type: materialType,
+    followup_stage: followupStage,
+    followup_activity: followupActivity,
+    communication_method: communicationMethod,
+    po_date: poDate,
+    delivery_date: deliveryDate,
+    followup_due_date: followupDueDate,
+    edd: edd === '—' ? '' : edd,
+    template_key: templateKey,
+    from_email: fromEmail,
+    queued_by: queuedBy
+  };
+}
+
+function renderTextTemplate(templateText, context = {}) {
+  return String(templateText || '').replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_, key) => cleanText(context[key] ?? ''));
+}
+
+function parseTxtMailTemplate(templateText, fallbackSubject, context = {}) {
+  const rendered = renderTextTemplate(templateText, context).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  const lines = rendered.split('\n');
+  let subject = fallbackSubject;
+  if (lines[0] && /^subject\s*:/i.test(lines[0])) {
+    subject = cleanText(lines.shift().replace(/^subject\s*:/i, '')) || fallbackSubject;
+    if (lines[0] === '') lines.shift();
+  }
+  return { subject, body: lines.join('\n').trim() };
+}
+
+async function loadMailTemplateText(templateKey) {
+  const safeKey = cleanText(templateKey).replace(/[^A-Za-z0-9_-]/g, '');
+  if (!safeKey) return null;
+  try {
+    const response = await fetch(`mail_templates/${safeKey}.txt`, { cache: 'no-store' });
+    if (!response.ok) return null;
+    return await response.text();
+  } catch (error) {
+    console.warn('Mail template file could not be loaded', safeKey, error);
+    return null;
+  }
+}
+
+function buildFallbackTxtTemplate(templateKey, context = {}) {
+  const isDelay = normalizeKey(context.followup_stage).includes('DELAY') || normalizeKey(templateKey).includes('DELAY');
+  const subjectPrefix = isDelay ? 'Delayed PO Follow-up Required' : 'Vendor Follow-up Required';
+  return `Subject: ${subjectPrefix}: PO {{po_number}} - {{followup_stage}}
+
+Dear {{vendor_name}},
+
+This is a follow-up for PO {{po_number}}.
+
+PO Details:
+- PO Number: {{po_number}}
+- Material Type: {{material_type}}
+- Follow-up Stage: {{followup_stage}}
+- Required Update: {{followup_activity}}
+- Communication Method: {{communication_method}}
+- PO Date: {{po_date}}
+- Delivery Date: {{delivery_date}}
+- Follow-up Due Date: {{followup_due_date}}
+
+Please confirm:
+- Current status
+- Dispatch / production plan
+- Expected delivery timeline
+- Revised EDD, if delayed
+
+Regards,
+Stack n Stock Procurement Team`;
+}
+
+async function buildFollowupMailTemplate(card, po, extra = {}) {
+  const templateKey = getFollowupTemplateKey(card, po);
+  const context = getTemplateContext(card, po, { ...extra, templateKey });
+  const fallbackSubject = `Vendor Follow-up Required: PO ${context.po_number} - ${context.followup_stage}`;
+  const templateText = await loadMailTemplateText(templateKey) || buildFallbackTxtTemplate(templateKey, context);
+  const parsed = parseTxtMailTemplate(templateText, fallbackSubject, context);
+  return { subject: parsed.subject, body: parsed.body, templateKey };
+}
+
+function getVendorContactByName(vendorName) {
+  const wanted = normalizeKey(vendorName);
+  if (!wanted) return {};
+  const direct = state.vendorContacts?.[cleanText(vendorName)];
+  if (direct) return direct;
+  const matchedKey = Object.keys(state.vendorContacts || {}).find(key => normalizeKey(key) === wanted);
+  return matchedKey ? state.vendorContacts[matchedKey] : {};
 }
 
 function getFollowupVendorEmail(card, po) {
   const vendorName = cleanText(card?.vendor_name || po?.vendorName || '');
-  return cleanText(card?.vendor_email || po?.vendorEmail || state.vendorContacts?.[vendorName]?.email || '');
+  const contact = getVendorContactByName(vendorName);
+  return cleanText(card?.vendor_email || po?.vendorEmail || contact?.email || '');
 }
 
-function openFollowupMailModal(followupId, poKey) {
+async function openFollowupMailModal(followupId, poKey) {
   const { card, po } = getFollowupByIdOrPo(followupId, poKey);
   if (!card) {
     alert('Follow-up card not found. Refresh once and try again.');
@@ -2808,12 +2897,14 @@ function openFollowupMailModal(followupId, poKey) {
   const form = document.getElementById('followupMailForm');
   if (!form) return;
   form.reset();
-  const { subject, body, templateKey } = buildFollowupMailTemplate(card, po);
+  const { subject, body, templateKey } = await buildFollowupMailTemplate(card, po);
   form.elements.followupId.value = cleanText(followupId);
   form.elements.poKey.value = cleanText(poKey || card.poKey || card.po_number);
   form.elements.templateKey.value = templateKey;
   form.elements.to.value = getFollowupVendorEmail(card, po);
   form.elements.cc.value = '';
+  const fromInput = form.elements.namedItem('from');
+  if (fromInput) fromInput.value = followupMailConfig.fromEmail || 'sourcing@stacknstock.in';
   form.elements.queuedBy.value = '';
   form.elements.subject.value = subject;
   form.elements.body.value = body;
@@ -2823,6 +2914,8 @@ function openFollowupMailModal(followupId, poKey) {
   document.getElementById('followupMailAction').textContent = card.followup_activity || 'Follow up with vendor';
   document.getElementById('followupMailTemplate').textContent = templateKey;
   document.getElementById('followupMailDelivery').textContent = formatDate(po?.deliveryDate || card.po_delivery_date || '');
+  const templateFileLabel = document.getElementById('followupMailTemplateFile');
+  if (templateFileLabel) templateFileLabel.textContent = `mail_templates/${templateKey}.txt`;
   document.getElementById('followupMailBackdrop')?.classList.remove('hidden');
 }
 
@@ -2843,6 +2936,79 @@ function applyFollowupMailQueuedLocally(followupRow, queuePayload) {
   state.followups.push(updated);
 }
 
+function preserveMultilineText(value) {
+  return String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+}
+
+function textToEmailHtml(text) {
+  const lines = preserveMultilineText(text).split('\n');
+  let html = '<div style="font-family: Arial, sans-serif; font-size: 14px; color: #222; line-height: 1.6;">';
+  let inList = false;
+  let paragraph = [];
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    html += `<p style="margin: 0 0 12px;">${paragraph.map(escapeHtml).join('<br>')}</p>`;
+    paragraph = [];
+  };
+  const closeList = () => {
+    if (!inList) return;
+    html += '</ul>';
+    inList = false;
+  };
+  lines.forEach(rawLine => {
+    const line = String(rawLine || '').trimEnd();
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushParagraph();
+      closeList();
+      return;
+    }
+    if (/^[-*]\s+/.test(trimmed)) {
+      flushParagraph();
+      if (!inList) {
+        html += '<ul style="margin: 0 0 14px 20px; padding: 0;">';
+        inList = true;
+      }
+      html += `<li style="margin: 0 0 6px;">${escapeHtml(trimmed.replace(/^[-*]\s+/, ''))}</li>`;
+      return;
+    }
+    if (trimmed.endsWith(':') && trimmed.length <= 80) {
+      flushParagraph();
+      closeList();
+      html += `<p style="margin: 0 0 8px;"><strong>${escapeHtml(trimmed)}</strong></p>`;
+      return;
+    }
+    closeList();
+    paragraph.push(trimmed);
+  });
+  flushParagraph();
+  closeList();
+  html += '</div>';
+  return html;
+}
+
+async function insertVendorEmailQueueRow(queuePayload) {
+  const first = await supabaseClient.from('vendor_email_queue').insert(queuePayload).select('*').single();
+  if (!first.error) return first.data;
+  const message = String(first.error.message || '');
+  const optionalColumns = [
+    'from_email',
+    'queued_by',
+    'body_html',
+    'followup_activity',
+    'communication_method',
+    'po_date',
+    'delivery_date',
+    'followup_due_date'
+  ];
+  if (!optionalColumns.some(column => message.includes(column))) throw first.error;
+  const fallbackPayload = { ...queuePayload };
+  optionalColumns.forEach(column => delete fallbackPayload[column]);
+  const second = await supabaseClient.from('vendor_email_queue').insert(fallbackPayload).select('*').single();
+  if (second.error) throw second.error;
+  return second.data;
+}
+
 async function queueFollowupMail(event) {
   event.preventDefault();
   const form = event.target;
@@ -2861,12 +3027,17 @@ async function queueFollowupMail(event) {
   }
   const to = cleanText(form.elements.to.value);
   const cc = cleanText(form.elements.cc.value);
+  const fromEmail = cleanText(form.elements.namedItem('from')?.value || followupMailConfig.fromEmail || 'sourcing@stacknstock.in');
   const queuedBy = cleanText(form.elements.queuedBy.value);
   const subject = cleanText(form.elements.subject.value);
-  const body = cleanText(form.elements.body.value);
+  const body = preserveMultilineText(form.elements.body.value);
   const templateKey = cleanText(form.elements.templateKey.value || getFollowupTemplateKey(card, po));
   if (!to) {
     alert('Vendor email is required before queueing mail.');
+    return;
+  }
+  if (!queuedBy) {
+    alert('Enter the person name in Queued by.');
     return;
   }
   if (!subject) {
@@ -2888,28 +3059,37 @@ async function queueFollowupMail(event) {
     const vendorName = cleanText(persisted.vendor_name || card.vendor_name || po?.vendorName || 'Unknown Vendor');
     const materialType = normalizeMaterialType(persisted.material_type || card.material_type || po?.materialType || 'Unknown');
     const followupStage = cleanText(persisted.followup_stage || card.followup_stage || 'Follow-up');
+    const communicationMethod = cleanText(persisted.communication_method || card.communication_method || 'Email');
+    const followupActivity = cleanText(persisted.followup_activity || card.followup_activity || 'Follow up with vendor');
     const queuePayload = {
       followup_id: followupId || null,
       po_number: poNumber,
       vendor_name: vendorName,
       vendor_email: to,
       cc_email: cc || null,
+      from_email: fromEmail,
+      queued_by: queuedBy,
       subject,
       body,
+      body_html: textToEmailHtml(body),
       material_type: materialType,
       followup_stage: followupStage,
+      followup_activity: followupActivity,
+      communication_method: communicationMethod,
+      po_date: safeDate(po?.poDate || card.po_date || null),
+      delivery_date: safeDate(po?.deliveryDate || card.po_delivery_date || null),
+      followup_due_date: safeDate(card.due_date || null),
       template_key: templateKey,
       status: 'Pending',
       created_by: queuedBy || null
     };
-    const { error: queueError } = await supabaseClient.from('vendor_email_queue').insert(queuePayload);
-    if (queueError) throw queueError;
+    const insertedQueue = await insertVendorEmailQueueRow(queuePayload);
     const { error: followupError } = await supabaseClient.from('po_followups').update({ email_status: 'Pending', updated_at: new Date().toISOString() }).eq('id', followupId);
     if (followupError) throw followupError;
     const logPayload = { followup_id: followupId || null, po_number: poNumber, action_type: 'Email Queued', update_received: `Mail queued to ${to}`, done_by: queuedBy || null, communication_method: 'Email', notes: subject };
     const { error: logError } = await supabaseClient.from('po_followup_logs').insert(logPayload);
     if (logError) throw logError;
-    await insertPoActivityEvent({ po_number: poNumber, event_type: 'email_queued', event_title: 'Follow-up Email Queued', event_description: `${followupStage} email queued to ${to}.`, actor: queuedBy || '', metadata: { followup_id: followupId, followup_stage: followupStage, vendor_email: to, cc_email: cc, template_key: templateKey } });
+    await insertPoActivityEvent({ po_number: poNumber, event_type: 'email_queued', event_title: 'Follow-up Email Queued', event_description: `${followupStage} email queued to ${to}.`, actor: queuedBy || '', metadata: { followup_id: followupId, queue_id: insertedQueue?.id, followup_stage: followupStage, vendor_email: to, cc_email: cc, from_email: fromEmail, template_key: templateKey } });
     applyFollowupMailQueuedLocally({ ...persisted, ...card }, queuePayload);
     if (useSupabase) await loadRemoteStateFromSupabase();
     closeFollowupMailModal();
@@ -2924,6 +3104,28 @@ async function queueFollowupMail(event) {
       submitBtn.textContent = originalText;
     }
   }
+}
+
+function importFollowupTxtTemplate(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const context = mailingFollowupContext || {};
+    const card = context.card || {};
+    const po = context.po || {};
+    const form = document.getElementById('followupMailForm');
+    if (!form) return;
+    const templateKey = cleanText(form.elements.templateKey.value || getFollowupTemplateKey(card, po));
+    const templateContext = getTemplateContext(card, po, { templateKey });
+    const parsed = parseTxtMailTemplate(String(reader.result || ''), form.elements.subject.value, templateContext);
+    form.elements.subject.value = parsed.subject;
+    form.elements.body.value = parsed.body;
+    const templateFileLabel = document.getElementById('followupMailTemplateFile');
+    if (templateFileLabel) templateFileLabel.textContent = file.name;
+    event.target.value = '';
+  };
+  reader.readAsText(file);
 }
 
 function setSelectOptions(id, options, selectedValue, placeholderLabel = 'All') {
@@ -4331,6 +4533,7 @@ function bindGlobalEvents() {
     if (event.target.id === 'followupMailBackdrop') closeFollowupMailModal();
   });
   document.getElementById('followupMailForm')?.addEventListener('submit', queueFollowupMail);
+  document.getElementById('followupTemplateImportInput')?.addEventListener('change', importFollowupTxtTemplate);
 
   document.getElementById('addLineBtn').addEventListener('click', () => {
     document.getElementById('poLineItems').appendChild(createLineItemCard({ quantityOrdered: 1, itemTaxPercent: 18 }));

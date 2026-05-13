@@ -514,8 +514,12 @@
             <input name="cc" type="text" placeholder="optional cc emails" />
           </label>
           <label>
-            <span>Queued by</span>
-            <input name="queuedBy" type="text" placeholder="e.g. Joseph" />
+            <span>From</span>
+            <input name="from" type="email" value="sourcing@stacknstock.in" readonly />
+          </label>
+          <label>
+            <span>Queued by *</span>
+            <input name="queuedBy" type="text" placeholder="e.g. Joseph" required />
           </label>
           <label>
             <span>Queue Status</span>
@@ -531,6 +535,14 @@
           <span>Email Body *</span>
           <textarea name="body" rows="14" required></textarea>
         </label>
+
+        <div class="template-import-row">
+          <div class="template-file-chip">Template file: <strong id="followupMailTemplateFile">mail_templates/DEFAULT.txt</strong></div>
+          <label class="ghost-btn small-btn file-btn template-import-btn">
+            Import TXT Template
+            <input type="file" id="followupTemplateImportInput" accept=".txt,text/plain" hidden />
+          </label>
+        </div>
 
         <div class="mail-note-box">
           This does not send mail directly from the app. It creates a <strong>Pending</strong> row in <strong>vendor_email_queue</strong>. Zoho Flow sends it and updates the status.
