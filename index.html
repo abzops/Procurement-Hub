@@ -518,12 +518,21 @@
             <input name="from" type="email" value="sourcing@stacknstock.in" readonly />
           </label>
           <label>
+<<<<<<< HEAD
             <span>Queued by *</span>
             <input name="queuedBy" type="text" placeholder="e.g. Joseph" required />
+=======
+            <span>Queued by / Sender name *</span>
+            <input name="queuedBy" type="text" value="" placeholder="e.g. Joseph" required />
+>>>>>>> origin/main
           </label>
           <label>
             <span>Queue Status</span>
             <input value="Pending - Zoho Flow will send" readonly />
+          </label>
+          <label>
+            <span>Webhook</span>
+            <input id="followupMailWebhookStatus" value="Webhook disabled" readonly />
           </label>
         </div>
 
