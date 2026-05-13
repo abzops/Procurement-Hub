@@ -3091,21 +3091,6 @@ function renderFollowups({ pos }) {
 
 function getFollowupByIdOrPo(followupId, poKey) {
   const derived = buildDerived();
-<<<<<<< HEAD
-  const po =
-    derived.pos.find(
-      (item) => item.poKey === poKey || item.poNumber === poKey,
-    ) || null;
-  const allCards = buildFollowupCards(derived.pos);
-  const card =
-    allCards.find((item) => cleanText(item.id) === cleanText(followupId)) ||
-    allCards.find(
-      (item) =>
-        cleanText(item.poKey || item.po_number) === cleanText(poKey) ||
-        cleanText(item.po_number) === cleanText(poKey),
-    ) ||
-    null;
-=======
   const cleanFollowupId = cleanText(followupId);
   const cleanPoKey = cleanText(poKey);
   const po = derived.pos.find(item => cleanText(item.poKey) === cleanPoKey || cleanText(item.poNumber) === cleanPoKey) || null;
@@ -3125,7 +3110,6 @@ function getFollowupByIdOrPo(followupId, poKey) {
       return cardPoKey === cleanPoKey || cardPoNumber === cleanPoKey;
     })
     || null;
->>>>>>> origin/main
   return { card, po };
 }
 
@@ -3259,7 +3243,7 @@ function buildNextFollowupCandidate({
     persisted.po_number || card.po_number || po.poNumber,
   );
   if (!poNumber) return null;
-  if (isFollowupCycleClosed(po, completion.closeReason)) return null;
+  if (isFollowupCycleClosed(completion.closeReason, po?.deliveryStatus || card.delivery_status || persisted.delivery_status || "")) return null;
 
   const selectedNextDate = parseDateOnly(completion.nextFollowupDate);
   const completedDate =
@@ -3726,84 +3710,6 @@ async function completeFollowup(event) {
   }
 }
 
-<<<<<<< HEAD
-function getFollowupTemplateKey(card, po) {
-  const material = normalizeMaterialType(
-    card?.material_type || po?.materialType || "Unknown",
-  );
-  const stage = normalizeKey(
-    card?.followup_key || card?.followup_stage || "FOLLOWUP",
-  );
-  return `${material}_${stage || "FOLLOWUP"}`;
-}
-
-function buildFollowupMailTemplate(card, po) {
-  const poNumber = cleanText(card?.po_number || po?.poNumber || "");
-  const vendorName = cleanText(card?.vendor_name || po?.vendorName || "Vendor");
-  const materialType = normalizeMaterialType(
-    card?.material_type || po?.materialType || "Unknown",
-  );
-  const stage = cleanText(card?.followup_stage || "Vendor Follow-up");
-  const activity = cleanText(
-    card?.followup_activity ||
-      "Please confirm current PO status and delivery timeline.",
-  );
-  const communication = cleanText(card?.communication_method || "Email");
-  const deliveryDate = formatDate(
-    po?.deliveryDate || card?.po_delivery_date || "",
-  );
-  const followupDue = formatDate(card?.due_date || "");
-  const edd = formatDate(po?.edd || card?.edd || "");
-  const isDelay =
-    normalizeKey(stage).includes("DELAY") ||
-    normalizeKey(activity).includes("DELAY");
-  const isMto = materialType === "MTO";
-  const isRto = materialType === "RTO";
-  const subjectPrefix = isDelay
-    ? "Delay Follow-up Required"
-    : "Vendor Follow-up Required";
-  const subject = `${subjectPrefix}: PO ${poNumber} - ${stage}`;
-  const stageLine = isMto
-    ? "This is an MTO follow-up. Please share the current production/manufacturing status clearly."
-    : isRto
-      ? "This is an RTO follow-up. Please confirm readiness, dispatch, and delivery status clearly."
-      : "This is a PO follow-up. Please confirm the latest status clearly.";
-  const delayAsk = isDelay
-    ? "\nSince the PO is delayed, please share:\n- reason for delay\n- revised estimated delivery date\n- dispatch status\n- expected arrival date\n"
-    : "";
-  const body = [
-    `Dear ${vendorName},`,
-    "",
-    `This is a follow-up for PO ${poNumber}.`,
-    stageLine,
-    "",
-    `Follow-up Stage: ${stage}`,
-    `Required Update: ${activity}`,
-    `Communication Method: ${communication}`,
-    "",
-    `PO Date: ${formatDate(po?.poDate || card?.po_date || "")}`,
-    `Original Delivery Date: ${deliveryDate}`,
-    `Follow-up Due Date: ${followupDue}`,
-    edd !== "—" ? `Current EDD: ${edd}` : "",
-    delayAsk,
-    "Please reply with the latest status and expected delivery timeline.",
-    "",
-    "Regards,",
-    "Stack n Stock Procurement Team",
-  ]
-    .filter((line) => line !== "")
-    .join("\n");
-  return { subject, body, templateKey: getFollowupTemplateKey(card, po) };
-}
-
-function getFollowupVendorEmail(card, po) {
-  const vendorName = cleanText(card?.vendor_name || po?.vendorName || "");
-  return cleanText(
-    card?.vendor_email ||
-      po?.vendorEmail ||
-      state.vendorContacts?.[vendorName]?.email ||
-      "",
-=======
 
 
 const FOLLOWUP_MAIL_TEMPLATES = {
@@ -4088,7 +3994,6 @@ function getFollowupVendorEmail(card, po) {
     || po?.vendorEmail
     || contact?.email
     || ''
->>>>>>> origin/main
   );
 }
 
@@ -4113,25 +4018,6 @@ function openFollowupMailModal(followupId, poKey) {
   form.elements.poKey.value = cleanText(poKey || card.poKey || card.po_number);
   form.elements.templateKey.value = templateKey;
   form.elements.to.value = getFollowupVendorEmail(card, po);
-<<<<<<< HEAD
-  form.elements.cc.value = "";
-  form.elements.queuedBy.value = "";
-  form.elements.subject.value = subject;
-  form.elements.body.value = body;
-  document.getElementById("followupMailTitle").textContent =
-    `Send Mail - ${card.po_number || poKey}`;
-  document.getElementById("followupMailSubtext").textContent =
-    `${card.vendor_name || po?.vendorName || "Vendor"} • ${card.followup_stage || "Follow-up"}`;
-  document.getElementById("followupMailStage").textContent =
-    card.followup_stage || "Follow-up";
-  document.getElementById("followupMailAction").textContent =
-    card.followup_activity || "Follow up with vendor";
-  document.getElementById("followupMailTemplate").textContent = templateKey;
-  document.getElementById("followupMailDelivery").textContent = formatDate(
-    po?.deliveryDate || card.po_delivery_date || "",
-  );
-  document.getElementById("followupMailBackdrop")?.classList.remove("hidden");
-=======
   form.elements.cc.value = '';
   const fromInput = form.elements.namedItem('from');
   if (fromInput) fromInput.value = followupMailConfig.fromEmail;
@@ -4148,7 +4034,6 @@ function openFollowupMailModal(followupId, poKey) {
   const webhookStatusInput = document.getElementById('followupMailWebhookStatus');
   if (webhookStatusInput) webhookStatusInput.value = followupMailConfig.webhookEnabled ? 'Webhook enabled' : 'Webhook disabled';
   document.getElementById('followupMailBackdrop')?.classList.remove('hidden');
->>>>>>> origin/main
 }
 
 function closeFollowupMailModal() {
@@ -4160,21 +4045,9 @@ function closeFollowupMailModal() {
 function applyFollowupMailQueuedLocally(followupRow, queuePayload) {
   const id = cleanText(followupRow.id);
   const poNumber = cleanText(followupRow.po_number || queuePayload.po_number);
-<<<<<<< HEAD
-  const stage = cleanText(
-    followupRow.followup_stage || queuePayload.followup_stage,
-  );
-  const updated = {
-    ...followupRow,
-    email_status: "Pending",
-    latestUpdate: `Mail queued for Zoho Flow by ${queuePayload.created_by || "user"}.`,
-  };
-  state.followups = (state.followups || []).filter((item) => {
-=======
   const stage = cleanText(followupRow.followup_stage || queuePayload.followup_stage);
   const updated = { ...followupRow, email_status: 'Pending', latestUpdate: `Mail queued from ${queuePayload.from_email || followupMailConfig.fromEmail} for Zoho Flow.` };
   state.followups = (state.followups || []).filter(item => {
->>>>>>> origin/main
     if (id && cleanText(item.id) === id) return false;
     return !(
       cleanText(item.po_number) === poNumber &&
@@ -4271,15 +4144,11 @@ async function queueFollowupMail(event) {
     form.elements.templateKey.value || getFollowupTemplateKey(card, po),
   );
   if (!to) {
-<<<<<<< HEAD
-    alert("Vendor email is required before queueing mail.");
-=======
     alert('Vendor email is required before queueing mail. Add it in Vendor Details or enter it manually.');
     return;
   }
   if (!queuedBy) {
     alert('Enter the sender name in Queued by. From email will remain sourcing@stacknstock.in.');
->>>>>>> origin/main
     return;
   }
   if (!subject) {
@@ -4293,11 +4162,7 @@ async function queueFollowupMail(event) {
   try {
     if (submitBtn) {
       submitBtn.disabled = true;
-<<<<<<< HEAD
-      submitBtn.textContent = "Queueing...";
-=======
       submitBtn.textContent = followupMailConfig.webhookEnabled ? 'Queueing + Webhook...' : 'Queueing...';
->>>>>>> origin/main
     }
     const persisted = await ensureFollowupPersisted(card);
     const followupId = cleanText(persisted.id);
@@ -4329,47 +4194,6 @@ async function queueFollowupMail(event) {
       material_type: materialType,
       followup_stage: followupStage,
       template_key: templateKey,
-<<<<<<< HEAD
-      status: "Pending",
-      created_by: queuedBy || null,
-    };
-    const { error: queueError } = await supabaseClient
-      .from("vendor_email_queue")
-      .insert(queuePayload);
-    if (queueError) throw queueError;
-    const { error: followupError } = await supabaseClient
-      .from("po_followups")
-      .update({ email_status: "Pending", updated_at: new Date().toISOString() })
-      .eq("id", followupId);
-    if (followupError) throw followupError;
-    const logPayload = {
-      followup_id: followupId || null,
-      po_number: poNumber,
-      action_type: "Email Queued",
-      update_received: `Mail queued to ${to}`,
-      done_by: queuedBy || null,
-      communication_method: "Email",
-      notes: subject,
-    };
-    const { error: logError } = await supabaseClient
-      .from("po_followup_logs")
-      .insert(logPayload);
-    if (logError) throw logError;
-    await insertPoActivityEvent({
-      po_number: poNumber,
-      event_type: "email_queued",
-      event_title: "Follow-up Email Queued",
-      event_description: `${followupStage} email queued to ${to}.`,
-      actor: queuedBy || "",
-      metadata: {
-        followup_id: followupId,
-        followup_stage: followupStage,
-        vendor_email: to,
-        cc_email: cc,
-        template_key: templateKey,
-      },
-    });
-=======
       status: 'Pending',
       webhook_status: followupMailConfig.webhookEnabled ? 'Pending' : 'Disabled',
       webhook_response: null,
@@ -4403,16 +4227,11 @@ async function queueFollowupMail(event) {
     const { error: logError } = await supabaseClient.from('po_followup_logs').insert(logPayload);
     if (logError) throw logError;
     await insertPoActivityEvent({ po_number: poNumber, event_type: 'email_queued', event_title: webhookTriggered ? 'Follow-up Email Webhook Triggered' : 'Follow-up Email Queued', event_description: `${followupStage} email queued to ${to}${webhookTriggered ? ' and sent to Zoho Flow webhook' : ''}.`, actor: queuedBy || '', metadata: { followup_id: followupId, followup_stage: followupStage, vendor_email: to, cc_email: cc, from_email: fromEmail, template_key: templateKey, webhook_enabled: followupMailConfig.webhookEnabled, webhook_triggered: webhookTriggered } });
->>>>>>> origin/main
     applyFollowupMailQueuedLocally({ ...persisted, ...card }, queuePayload);
     if (useSupabase) await loadRemoteStateFromSupabase();
     closeFollowupMailModal();
     renderAll();
-<<<<<<< HEAD
-    alert("Mail queued. Zoho Flow will send it from vendor_email_queue.");
-=======
     alert(followupMailConfig.webhookEnabled ? 'Mail queued and Zoho Flow webhook triggered.' : 'Mail queued. Zoho Flow will send it from vendor_email_queue.');
->>>>>>> origin/main
   } catch (error) {
     console.error("Queue follow-up mail failed", error);
     alert(`Queue mail failed: ${error.message || error}`);
