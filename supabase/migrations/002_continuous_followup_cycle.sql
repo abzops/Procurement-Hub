@@ -1,5 +1,5 @@
 -- Continuous follow-up cycle support
--- Run once in Supabase SQL Editor before testing this patch.
+-- Allows repeated daily delay follow-ups for the same PO/stage on different dates.
 
 alter table public.po_followups
 add column if not exists followup_type text default 'Lead Time Follow-up',
@@ -10,14 +10,10 @@ alter table public.po_followup_logs
 add column if not exists close_reason text,
 add column if not exists created_next_followup_date date;
 
--- Keep existing rows classified.
 update public.po_followups
 set followup_type = 'Lead Time Follow-up'
 where followup_type is null or trim(followup_type) = '';
 
--- Daily delay follow-ups can repeat for the same PO/stage on different dates.
--- The original foundation unique index only allowed one row per PO + stage,
--- which blocked the next day in a continuous follow-up cycle.
 drop index if exists public.po_followups_unique_po_stage;
 
 create unique index if not exists po_followups_unique_po_stage_due_date
@@ -28,7 +24,6 @@ create unique index if not exists po_followups_unique_po_stage_no_due_date
 on public.po_followups (po_number, followup_stage)
 where due_date is null;
 
--- Keep email/call constraints compatible with the current app values.
 alter table public.po_followups
 drop constraint if exists po_followups_email_status_check;
 
@@ -58,7 +53,6 @@ check (
   )
 );
 
--- RLS support for browser app updates/inserts.
 grant select, insert, update on public.po_followups to anon, authenticated;
 grant select, insert, update on public.po_followup_logs to anon, authenticated;
 grant select, insert on public.po_activity_events to anon, authenticated;

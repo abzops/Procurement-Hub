@@ -329,6 +329,17 @@ function roundMoney(value) {
   return Number.isFinite(n) ? Number(n.toFixed(2)) : 0;
 }
 
+function parsePayloadMoney(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const direct = Number(value);
+  if (Number.isFinite(direct)) return Number(direct.toFixed(2));
+  const cleaned = String(value).replace(/[^0-9.-]+/g, "");
+  if (!cleaned || cleaned === "-" || cleaned === "." || cleaned === "-.")
+    return null;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : null;
+}
+
 function derivePaymentState(
   poTotal,
   amountPaidInput = 0,
@@ -1109,11 +1120,31 @@ function convertZohoPoPayloadToDbPayload(payload) {
   const chargeCount = chargeLines.length;
   const productCount = productLines.length;
 
+  const explicitAmountPaid = parsePayloadMoney(
+    payload.amount_paid ??
+      payload.paid_amount ??
+      payload.amount_paid_formatted ??
+      payload.paid_amount_formatted,
+  );
+  const explicitBalanceDue = parsePayloadMoney(
+    payload.balance_due ??
+      payload.balance ??
+      payload.outstanding_balance ??
+      payload.balance_due_formatted ??
+      payload.balance_formatted,
+  );
+
   let amountPaid = 0;
   let balanceDue = totalAmount;
   if (paymentStatus === "Paid") {
     amountPaid = totalAmount;
     balanceDue = 0;
+  } else if (explicitBalanceDue !== null) {
+    balanceDue = Math.max(0, Math.min(totalAmount, explicitBalanceDue));
+    amountPaid = Math.max(0, roundMoney(totalAmount - balanceDue));
+  } else if (explicitAmountPaid !== null) {
+    amountPaid = Math.max(0, Math.min(totalAmount, explicitAmountPaid));
+    balanceDue = Math.max(0, roundMoney(totalAmount - amountPaid));
   } else if (paymentStatus === "Partially Paid") {
     amountPaid = roundMoney(totalAmount / 2);
     balanceDue = roundMoney(totalAmount / 2);
@@ -2794,11 +2825,16 @@ function buildFollowupCards(pos = []) {
     if (!po || normalizeDeliveryStatus(po.deliveryStatus) === "Delivered")
       return;
     const poNumberForSchedule = cleanText(po.poNumber);
-    if (activeFutureScheduledByPo.has(poNumberForSchedule)) return;
     const current = getCurrentFollowupForPo(po, selectedDate);
     if (!current || isAcknowledgementFollowup(current)) return;
     const dueDate = parseDateOnly(current.due_date);
     if (!dueDate || !selectedDate || dueDate > selectedDate) return;
+    // Do not suppress Daily Delay follow-ups due today, even if future scheduled follow-up exists
+    const isDailyDelayDueToday =
+      normalizeKey(current.followup_type).includes("DAILY DELAY") &&
+      dueDate.getTime() === selectedDate.getTime();
+    if (activeFutureScheduledByPo.has(poNumberForSchedule) && !isDailyDelayDueToday)
+      return;
     const poNumber = cleanText(current.po_number || po.poNumber);
     const stage = cleanText(current.followup_stage);
     const persistedMatch = persistedByPoStage.get(makeFollowupTaskKey(current));
