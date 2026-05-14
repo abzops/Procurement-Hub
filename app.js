@@ -1109,6 +1109,16 @@ function convertZohoPoPayloadToDbPayload(payload) {
   const chargeCount = chargeLines.length;
   const productCount = productLines.length;
 
+  let amountPaid = 0;
+  let balanceDue = totalAmount;
+  if (paymentStatus === "Paid") {
+    amountPaid = totalAmount;
+    balanceDue = 0;
+  } else if (paymentStatus === "Partially Paid") {
+    amountPaid = roundMoney(totalAmount / 2);
+    balanceDue = roundMoney(totalAmount / 2);
+  }
+
   return {
     purchase_orders: [
       {
@@ -1133,8 +1143,8 @@ function convertZohoPoPayloadToDbPayload(payload) {
         discount_type: "amount",
         discount_input_value: discountInputValue,
         adjustment_amount: adjustmentAmount,
-        amount_paid: paymentStatus === "Paid" ? totalAmount : 0,
-        balance_due: paymentStatus === "Paid" ? 0 : totalAmount,
+        amount_paid: amountPaid,
+        balance_due: balanceDue,
       },
     ],
     po_lines: poLines,
@@ -3475,6 +3485,7 @@ function applyFollowupCompletionLocally(followupRow, completion) {
 
   state.followups = (state.followups || []).filter((item) => {
     if (id && cleanText(item.id) === id) return false;
+    if (id) return true;
     return !(
       cleanText(item.po_number) === poNumber &&
       cleanText(item.followup_stage) === cleanText(followupRow.followup_stage)
@@ -4049,6 +4060,7 @@ function applyFollowupMailQueuedLocally(followupRow, queuePayload) {
   const updated = { ...followupRow, email_status: 'Pending', latestUpdate: `Mail queued from ${queuePayload.from_email || followupMailConfig.fromEmail} for Zoho Flow.` };
   state.followups = (state.followups || []).filter(item => {
     if (id && cleanText(item.id) === id) return false;
+    if (id) return true;
     return !(
       cleanText(item.po_number) === poNumber &&
       cleanText(item.followup_stage) === stage
