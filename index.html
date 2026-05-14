@@ -52,6 +52,7 @@
       <button class="tab" data-tab="vendors">Vendors</button>
       <button class="tab" data-tab="vendor-metrics">Vendor Metrics</button>
       <button class="tab" data-tab="follow-ups">Follow-ups</button>
+      <button class="tab" data-tab="po-availability">PO Number Availability</button>
     </nav>
 
     <main>
@@ -238,6 +239,10 @@
           <div id="followupCardList" class="followup-card-list"></div>
         </article>
       </section>
+
+      <section class="tab-panel" id="po-availability">
+        <div id="poAvailabilityContent"></div>
+      </section>
     </main>
   </div>
 
@@ -378,6 +383,75 @@
         <div class="form-actions">
           <button type="button" class="ghost-btn" id="cancelPoBtn">Cancel</button>
           <button type="submit" class="primary-btn" id="savePoBtn">Save Purchase Order</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="poTokenBackdrop">
+    <div class="modal-shell modal-medium">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">PO TOKEN</p>
+          <h3 id="poTokenTitle">Take PO Number</h3>
+          <p class="section-copy" id="poTokenSubtext">Reserve the current available PO number.</p>
+        </div>
+        <button class="icon-btn" id="closePoTokenModalBtn" type="button" aria-label="Close">&times;</button>
+      </div>
+
+      <form id="poTokenForm" class="modal-form po-token-form">
+        <input type="hidden" name="poNumber" />
+        <input type="hidden" name="poSource" />
+        <div class="po-token-preview">
+          <span>PO Number</span>
+          <strong id="poTokenPreviewNumber">PO-00000</strong>
+          <small id="poTokenPreviewType">New Sequence</small>
+        </div>
+        <div class="form-grid">
+          <label class="field">
+            <span>Name</span>
+            <input class="control-input" type="text" name="takenBy" required placeholder="Enter name" />
+          </label>
+          <label class="field">
+            <span>Type</span>
+            <select class="control-input" name="requestType">
+              <option>Marketplace</option>
+              <option>Vendor</option>
+            </select>
+          </label>
+          <label class="field-full">
+            <span>Notes</span>
+            <textarea name="notes" placeholder="Optional context for this reservation"></textarea>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="ghost-btn" id="cancelPoTokenBtn">Cancel</button>
+          <button type="submit" class="primary-btn">Confirm & Take PO</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="poTokenCancelBackdrop">
+    <div class="modal-shell modal-medium">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">CANCEL PO TOKEN</p>
+          <h3 id="poTokenCancelTitle">Cancel PO Reservation</h3>
+          <p class="section-copy" id="poTokenCancelSubtext">Move the draft PO number into the reusable queue.</p>
+        </div>
+        <button class="icon-btn" id="closePoTokenCancelModalBtn" type="button" aria-label="Close">&times;</button>
+      </div>
+
+      <form id="poTokenCancelForm" class="modal-form po-token-form">
+        <input type="hidden" name="tokenNumber" />
+        <label class="field-full">
+          <span>Cancellation Reason</span>
+          <textarea name="cancellationReason" required placeholder="Why is this draft PO number being cancelled?"></textarea>
+        </label>
+        <div class="form-actions">
+          <button type="button" class="ghost-btn" id="cancelPoTokenCancelBtn">Keep Reservation</button>
+          <button type="submit" class="danger-btn">Cancel PO</button>
         </div>
       </form>
     </div>

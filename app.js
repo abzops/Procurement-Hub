@@ -4,6 +4,10 @@ const STORAGE_KEYS = {
   vendorContacts: "sns-vendor-contacts-v1",
   productVendorMetrics: "sns-product-vendor-metrics-v1",
   deletedVendors: "sns-deleted-vendors-v1",
+  poTokenLog: "sns-po-token-log-v1",
+  reusableQueue: "sns-reusable-po-queue-v1",
+  poMaster: "sns-po-master-v1",
+  activeReservations: "sns-active-po-reservations-v1",
 };
 
 let baseRows = Array.isArray(window.STACKNSTOCK_DATA?.rows)
@@ -112,6 +116,8 @@ const METRIC_PRODUCT_COLUMNS = [
   { key: "bestPrice", label: "Best Price" },
   { key: "lastOrderDate", label: "Last Order" },
 ];
+
+const PO_RESERVATION_TIMEOUT_MINUTES = 10;
 
 const FOLLOWUP_RULES = {
   RTO: [
@@ -245,6 +251,10 @@ const state = {
   followups: [],
   activityEvents: [],
   deletedVendors: loadJson(STORAGE_KEYS.deletedVendors, []),
+  poTokenLog: loadJson(STORAGE_KEYS.poTokenLog, []),
+  reusableQueue: loadJson(STORAGE_KEYS.reusableQueue, []),
+  poMaster: loadJson(STORAGE_KEYS.poMaster, []),
+  activeReservations: loadJson(STORAGE_KEYS.activeReservations, []),
   activeTab: "overview",
   selectedVendor: null,
   selectedMetricProduct: null,
@@ -309,6 +319,7 @@ let remoteSyncInFlight = false;
 let queueProcessingInFlight = false;
 let completingFollowupContext = null;
 let mailingFollowupContext = null;
+let poAvailabilityReleaseTimer = null;
 
 function cleanConfigText(value) {
   return String(value ?? "").trim();
@@ -338,6 +349,284 @@ function parsePayloadMoney(value) {
     return null;
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : null;
+}
+
+function normalizePoAvailabilityType(value) {
+  const raw = normalizeKey(value);
+  if (raw.includes("VENDOR")) return "Vendor";
+  return "Marketplace";
+}
+
+function normalizePoTokenStatus(value) {
+  const raw = normalizeKey(value);
+  if (raw.includes("SUBMIT")) return "Submitted";
+  if (raw.includes("CANCEL")) return "Cancelled";
+  if (raw.includes("UNUSED") || raw.includes("EXPIRE")) return "Unused";
+  return "Active";
+}
+
+function normalizeReusableStatus(value) {
+  const raw = normalizeKey(value);
+  if (raw.includes("RESERV")) return "Reserved";
+  if (raw.includes("USED") || raw.includes("SUBMIT")) return "Used";
+  return "Available";
+}
+
+function normalizePoMasterStatus(value) {
+  const raw = normalizeKey(value);
+  if (raw.includes("SUBMIT")) return "Submitted";
+  if (raw.includes("CANCEL")) return "Cancelled";
+  if (raw.includes("UNUSED") || raw.includes("EXPIRE")) return "Unused";
+  if (raw.includes("RESERV")) return "Reserved";
+  return "Available";
+}
+
+function normalizeAvailabilityArrays() {
+  state.poTokenLog = Array.isArray(state.poTokenLog) ? state.poTokenLog : [];
+  state.reusableQueue = Array.isArray(state.reusableQueue)
+    ? state.reusableQueue
+    : [];
+  state.poMaster = Array.isArray(state.poMaster) ? state.poMaster : [];
+  state.activeReservations = Array.isArray(state.activeReservations)
+    ? state.activeReservations
+    : [];
+}
+
+function toIsoDateTime(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return cleanText(value) || "—";
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function getPoNumberParts(value) {
+  const text = cleanText(value);
+  const match = text.match(/^(.*?)(\d+)$/);
+  if (!match) return null;
+  return {
+    prefix: match[1] || "PO-",
+    number: Number(match[2]),
+    width: match[2].length,
+  };
+}
+
+function formatPoNumber(prefix, numberValue, width) {
+  return `${prefix || "PO-"}${String(Math.max(0, Number(numberValue) || 0)).padStart(Math.max(4, width || 4), "0")}`;
+}
+
+function getFollowingPoNumber(poNumber) {
+  const parts = getPoNumberParts(poNumber);
+  if (!parts) return getNextSequencePO();
+  return formatPoNumber(parts.prefix, parts.number + 1, parts.width);
+}
+
+function comparePoNumbers(a, b) {
+  const aParts = getPoNumberParts(a);
+  const bParts = getPoNumberParts(b);
+  if (aParts && bParts && aParts.prefix === bParts.prefix)
+    return aParts.number - bParts.number;
+  return cleanText(a).localeCompare(cleanText(b), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function getKnownPoNumbers() {
+  normalizeAvailabilityArrays();
+  return new Set(
+    [
+      ...allRows().map((row) => row.poNumber),
+      ...state.poTokenLog.map((row) => row.poNumber),
+      ...state.reusableQueue.map((row) => row.poNumber),
+      ...state.poMaster.map((row) => row.poNumber),
+      ...state.activeReservations.map((row) => row.poNumber),
+    ]
+      .map(cleanText)
+      .filter(Boolean),
+  );
+}
+
+function getNextSequencePO() {
+  const known = getKnownPoNumbers();
+  const parts = [...known].map(getPoNumberParts).filter(Boolean);
+  const poParts = parts.filter((item) => normalizeKey(item.prefix).includes("PO"));
+  const candidates = poParts.length ? poParts : parts;
+  const maxPart = candidates.reduce(
+    (best, item) => (!best || item.number > best.number ? item : best),
+    null,
+  );
+  const prefix = maxPart?.prefix || "PO-";
+  const width = Math.max(5, maxPart?.width || 5);
+  let nextNumber = (maxPart?.number || 0) + 1;
+  let candidate = formatPoNumber(prefix, nextNumber, width);
+  while (known.has(candidate)) {
+    nextNumber += 1;
+    candidate = formatPoNumber(prefix, nextNumber, width);
+  }
+  return candidate;
+}
+
+function getOldestReusablePO() {
+  normalizeAvailabilityArrays();
+  return state.reusableQueue
+    .filter((row) => normalizeReusableStatus(row.status) === "Available")
+    .slice()
+    .sort((a, b) => {
+      const aTime = new Date(a.cancelledOn || a.cancelled_date || 0).getTime();
+      const bTime = new Date(b.cancelledOn || b.cancelled_date || 0).getTime();
+      if (aTime !== bTime) return aTime - bTime;
+      return comparePoNumbers(a.poNumber, b.poNumber);
+    })[0];
+}
+
+function upsertPoMaster(row) {
+  normalizeAvailabilityArrays();
+  const poNumber = cleanText(row?.poNumber);
+  if (!poNumber) return;
+  const existingIndex = state.poMaster.findIndex(
+    (item) => cleanText(item.poNumber) === poNumber,
+  );
+  const next = {
+    ...(existingIndex >= 0 ? state.poMaster[existingIndex] : {}),
+    ...row,
+    poNumber,
+    status: normalizePoMasterStatus(row.status),
+  };
+  if (existingIndex >= 0) state.poMaster[existingIndex] = next;
+  else state.poMaster.push(next);
+}
+
+function getTokenByNumber(tokenNumber) {
+  normalizeAvailabilityArrays();
+  const wanted = cleanText(tokenNumber);
+  return state.poTokenLog.find(
+    (token) => cleanText(token.tokenNumber) === wanted,
+  );
+}
+
+function generatePoTokenNumber() {
+  normalizeAvailabilityArrays();
+  const year = new Date().getFullYear();
+  const prefix = `TKN-${year}-`;
+  const next =
+    state.poTokenLog
+      .map((row) => cleanText(row.tokenNumber))
+      .filter((token) => token.startsWith(prefix))
+      .map((token) => Number(token.slice(prefix.length)))
+      .filter(Number.isFinite)
+      .reduce((max, value) => Math.max(max, value), 0) + 1;
+  return `${prefix}${String(next).padStart(4, "0")}`;
+}
+
+function autoReleaseExpiredPOReservations(now = new Date()) {
+  normalizeAvailabilityArrays();
+  const nowTime = now.getTime();
+  let changed = false;
+  state.activeReservations = state.activeReservations.filter((reservation) => {
+    const expiry = new Date(reservation.expiryTime || reservation.expiry_time);
+    if (Number.isNaN(expiry.getTime()) || expiry.getTime() > nowTime)
+      return true;
+
+    const poNumber = cleanText(reservation.poNumber || reservation.po_number);
+    const token = getTokenByNumber(
+      reservation.tokenNumber || reservation.token_number,
+    );
+    const source = cleanText(token?.source || reservation.source);
+    if (token && normalizePoTokenStatus(token.status) === "Active") {
+      token.status = "Unused";
+      token.releasedAt = toIsoDateTime(now);
+      token.releaseReason = "Reservation timeout exceeded";
+    }
+
+    if (source === "Reusable") {
+      const queueRow = state.reusableQueue.find(
+        (row) => cleanText(row.poNumber) === poNumber,
+      );
+      if (queueRow) queueRow.status = "Available";
+      upsertPoMaster({
+        poNumber,
+        status: "Available",
+        isReusable: true,
+        type: token?.type || reservation.type || "Marketplace",
+      });
+    } else {
+      upsertPoMaster({
+        poNumber,
+        status: "Unused",
+        isReusable: false,
+        type: token?.type || reservation.type || "Marketplace",
+      });
+    }
+    changed = true;
+    return false;
+  });
+  if (changed) saveState();
+  return changed;
+}
+
+function startPoAvailabilityAutoReleaseTimer() {
+  if (poAvailabilityReleaseTimer) return;
+  poAvailabilityReleaseTimer = setInterval(() => {
+    if (autoReleaseExpiredPOReservations()) renderAll();
+  }, 60000);
+}
+
+function getCurrentAvailablePO() {
+  autoReleaseExpiredPOReservations();
+  const reusable = getOldestReusablePO();
+  const nextSequencePo = getNextSequencePO();
+  if (reusable) {
+    return {
+      currentPo: cleanText(reusable.poNumber),
+      nextPo: nextSequencePo,
+      type: "Reusable",
+      reusable,
+    };
+  }
+  return {
+    currentPo: nextSequencePo,
+    nextPo: getFollowingPoNumber(nextSequencePo),
+    type: "New Sequence",
+    reusable: null,
+  };
+}
+
+function getPoAvailabilityStats() {
+  normalizeAvailabilityArrays();
+  return {
+    active: state.poTokenLog.filter(
+      (token) => normalizePoTokenStatus(token.status) === "Active",
+    ).length,
+    submitted: state.poTokenLog.filter(
+      (token) => normalizePoTokenStatus(token.status) === "Submitted",
+    ).length,
+    reusable: state.reusableQueue.filter(
+      (row) => normalizeReusableStatus(row.status) === "Available",
+    ).length,
+    expired: state.poTokenLog.filter(
+      (token) => normalizePoTokenStatus(token.status) === "Unused",
+    ).length,
+  };
+}
+
+function poAvailabilityStatusClass(status) {
+  const raw = normalizeKey(status);
+  if (raw.includes("SUBMIT") || raw.includes("USED") || raw.includes("AVAILABLE"))
+    return "good";
+  if (raw.includes("ACTIVE") || raw.includes("RESERV")) return "warning";
+  if (raw.includes("CANCEL") || raw.includes("UNUSED")) return "danger";
+  return "neutral";
 }
 
 function derivePaymentState(
@@ -521,6 +810,185 @@ function calculatePoBreakdown(
     grandTotal,
     lines: computedLines,
   };
+}
+
+function isOptionalSupabaseTableError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return (
+    error?.code === "42P01" ||
+    error?.code === "PGRST205" ||
+    message.includes("does not exist") ||
+    message.includes("schema cache")
+  );
+}
+
+async function loadPoAvailabilityFromSupabase() {
+  if (!useSupabase) return false;
+  const [masterRes, tokenRes, queueRes, reservationRes] = await Promise.all([
+    supabaseClient.from("po_master").select("*").order("po_number"),
+    supabaseClient
+      .from("po_token_log")
+      .select("*")
+      .order("timestamp", { ascending: false }),
+    supabaseClient
+      .from("reusable_queue")
+      .select("*")
+      .order("cancelled_date", { ascending: true }),
+    supabaseClient.from("active_reservations").select("*").order("reserved_at"),
+  ]);
+  const errors = [
+    masterRes.error,
+    tokenRes.error,
+    queueRes.error,
+    reservationRes.error,
+  ].filter(Boolean);
+  if (errors.length) {
+    if (!errors.every(isOptionalSupabaseTableError))
+      console.warn("PO availability load skipped", errors);
+    return false;
+  }
+
+  state.poMaster = (masterRes.data || []).map((row) => ({
+    poNumber: row.po_number,
+    status: normalizePoMasterStatus(row.status),
+    createdBy: row.created_by || "",
+    createdAt: row.created_at || "",
+    type: normalizePoAvailabilityType(row.type),
+    isReusable: Boolean(row.is_reusable),
+    tokenNumber: row.token_number || "",
+  }));
+  state.poTokenLog = (tokenRes.data || []).map((row) => ({
+    tokenNumber: row.token_number,
+    poNumber: row.po_number,
+    takenBy: row.taken_by || "",
+    type: normalizePoAvailabilityType(row.type),
+    timestamp: row.timestamp || "",
+    status: normalizePoTokenStatus(row.status),
+    notes: row.notes || "",
+    source: row.source || "",
+  }));
+  state.reusableQueue = (queueRes.data || []).map((row) => ({
+    poNumber: row.po_number,
+    cancelledBy: row.cancelled_by || "",
+    type: normalizePoAvailabilityType(row.type),
+    cancelledOn: row.cancelled_date || "",
+    reason: row.cancellation_reason || "",
+    status: normalizeReusableStatus(row.status),
+    tokenNumber: row.token_number || "",
+  }));
+  state.activeReservations = (reservationRes.data || []).map((row) => ({
+    poNumber: row.po_number,
+    tokenNumber: row.token_number || "",
+    reservedBy: row.reserved_by || "",
+    reservedAt: row.reserved_at || "",
+    expiryTime: row.expiry_time || "",
+    source: row.source || "",
+    type: normalizePoAvailabilityType(row.type),
+  }));
+  normalizeAvailabilityArrays();
+  localStorage.setItem(
+    STORAGE_KEYS.poTokenLog,
+    JSON.stringify(state.poTokenLog),
+  );
+  localStorage.setItem(
+    STORAGE_KEYS.reusableQueue,
+    JSON.stringify(state.reusableQueue),
+  );
+  localStorage.setItem(STORAGE_KEYS.poMaster, JSON.stringify(state.poMaster));
+  localStorage.setItem(
+    STORAGE_KEYS.activeReservations,
+    JSON.stringify(state.activeReservations),
+  );
+  return true;
+}
+
+async function syncPoAvailabilityToSupabase() {
+  if (!useSupabase) return;
+  normalizeAvailabilityArrays();
+  const masterPayload = state.poMaster.map((row) => ({
+    po_number: cleanText(row.poNumber),
+    status: normalizePoMasterStatus(row.status),
+    created_by: cleanText(row.createdBy || ""),
+    created_at: row.createdAt || null,
+    type: normalizePoAvailabilityType(row.type),
+    is_reusable: Boolean(row.isReusable),
+    token_number: cleanText(row.tokenNumber || "") || null,
+  }));
+  const tokenPayload = state.poTokenLog.map((row) => ({
+    token_number: cleanText(row.tokenNumber),
+    po_number: cleanText(row.poNumber),
+    taken_by: cleanText(row.takenBy || ""),
+    type: normalizePoAvailabilityType(row.type),
+    timestamp: row.timestamp || null,
+    status: normalizePoTokenStatus(row.status),
+    notes: row.notes || "",
+    source: cleanText(row.source || ""),
+  }));
+  const queuePayload = state.reusableQueue.map((row) => ({
+    po_number: cleanText(row.poNumber),
+    cancelled_by: cleanText(row.cancelledBy || ""),
+    type: normalizePoAvailabilityType(row.type),
+    cancellation_reason: row.reason || "",
+    cancelled_date: row.cancelledOn || null,
+    status: normalizeReusableStatus(row.status),
+    token_number: cleanText(row.tokenNumber || "") || null,
+  }));
+  const reservationPayload = state.activeReservations.map((row) => ({
+    po_number: cleanText(row.poNumber),
+    token_number: cleanText(row.tokenNumber || "") || null,
+    reserved_by: cleanText(row.reservedBy || ""),
+    reserved_at: row.reservedAt || null,
+    expiry_time: row.expiryTime || null,
+    source: cleanText(row.source || ""),
+    type: normalizePoAvailabilityType(row.type),
+  }));
+
+  try {
+    if (masterPayload.length) {
+      const { error } = await supabaseClient
+        .from("po_master")
+        .upsert(masterPayload, { onConflict: "po_number" });
+      if (error) throw error;
+    }
+    if (tokenPayload.length) {
+      const { error } = await supabaseClient
+        .from("po_token_log")
+        .upsert(tokenPayload, { onConflict: "token_number" });
+      if (error) throw error;
+    }
+    if (queuePayload.length) {
+      const { error } = await supabaseClient
+        .from("reusable_queue")
+        .upsert(queuePayload, { onConflict: "po_number" });
+      if (error) throw error;
+    }
+
+    const currentReservationKeys = new Set(
+      reservationPayload.map((row) => row.po_number).filter(Boolean),
+    );
+    const existingReservations = await supabaseClient
+      .from("active_reservations")
+      .select("po_number");
+    if (existingReservations.error) throw existingReservations.error;
+    for (const row of existingReservations.data || []) {
+      if (!currentReservationKeys.has(cleanText(row.po_number))) {
+        const { error } = await supabaseClient
+          .from("active_reservations")
+          .delete()
+          .eq("po_number", row.po_number);
+        if (error) throw error;
+      }
+    }
+    if (reservationPayload.length) {
+      const { error } = await supabaseClient
+        .from("active_reservations")
+        .upsert(reservationPayload, { onConflict: "po_number" });
+      if (error) throw error;
+    }
+  } catch (error) {
+    if (!isOptionalSupabaseTableError(error))
+      console.warn("PO availability sync skipped", error);
+  }
 }
 
 async function loadRemoteStateFromSupabase() {
@@ -707,6 +1175,7 @@ async function loadRemoteStateFromSupabase() {
     (row) => !isAcknowledgementFollowup(row),
   );
   state.activityEvents = activityEventsRes.data || [];
+  await loadPoAvailabilityFromSupabase();
   return true;
 }
 
@@ -868,6 +1337,7 @@ async function syncStateToSupabase() {
     }
 
     await generateFollowupsForPOs(derived.pos);
+    await syncPoAvailabilityToSupabase();
     await loadRemoteStateFromSupabase();
   } catch (error) {
     console.error("Supabase sync failed", error);
@@ -921,6 +1391,19 @@ function saveState() {
   localStorage.setItem(
     STORAGE_KEYS.deletedVendors,
     JSON.stringify(state.deletedVendors),
+  );
+  localStorage.setItem(
+    STORAGE_KEYS.poTokenLog,
+    JSON.stringify(state.poTokenLog),
+  );
+  localStorage.setItem(
+    STORAGE_KEYS.reusableQueue,
+    JSON.stringify(state.reusableQueue),
+  );
+  localStorage.setItem(STORAGE_KEYS.poMaster, JSON.stringify(state.poMaster));
+  localStorage.setItem(
+    STORAGE_KEYS.activeReservations,
+    JSON.stringify(state.activeReservations),
   );
   scheduleRemoteSync();
 }
@@ -5231,7 +5714,7 @@ function createLineItemCard(values = {}) {
   return wrapper;
 }
 
-function openPoModal(po = null) {
+function openPoModal(po = null, options = {}) {
   state.editingPoKey = po?.poKey || null;
   const modal = document.getElementById("poModalBackdrop");
   const title = document.getElementById("poModalTitle");
@@ -5313,6 +5796,7 @@ function openPoModal(po = null) {
     if (form.elements.materialType)
       form.elements.materialType.value = "Unknown";
     if (form.elements.edd) form.elements.edd.value = "";
+    if (options.poNumber) form.elements.poNumber.value = options.poNumber;
     linesMount.appendChild(
       createLineItemCard({ quantityOrdered: 1, itemTaxPercent: 18 }),
     );
@@ -5463,6 +5947,10 @@ function collectPoFormPayload(existingPo = null) {
     alert("Please fill PO date, vendor name, and at least one PO line.");
     return null;
   }
+  if (poNumberExistsForAnotherPO(poNumber, existingPo)) {
+    alert(`${poNumber} already exists. Please use an available PO number.`);
+    return null;
+  }
 
   const breakdown = calculatePoBreakdown(
     rawLines,
@@ -5522,6 +6010,7 @@ function collectPoFormPayload(existingPo = null) {
   return {
     updatedRows,
     removedRows,
+    poNumber,
     vendorName,
     source,
     gstin,
@@ -5577,6 +6066,7 @@ function applyPoChanges(existingPo, payload) {
     };
   }
 
+  markPoNumberSubmitted(payload.poNumber);
   saveState();
   closePoModal();
   renderAll();
@@ -5752,6 +6242,10 @@ function exportLocalState() {
     vendorContacts: state.vendorContacts,
     productVendorMetrics: state.productVendorMetrics,
     deletedVendors: state.deletedVendors,
+    poTokenLog: state.poTokenLog,
+    reusableQueue: state.reusableQueue,
+    poMaster: state.poMaster,
+    activeReservations: state.activeReservations,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: "application/json",
@@ -5784,6 +6278,10 @@ function exportFullData() {
       vendorContacts: state.vendorContacts,
       productVendorMetrics: state.productVendorMetrics,
       deletedVendors: state.deletedVendors,
+      poTokenLog: state.poTokenLog,
+      reusableQueue: state.reusableQueue,
+      poMaster: state.poMaster,
+      activeReservations: state.activeReservations,
     },
     mergedView: {
       rows: allRows(),
@@ -5855,26 +6353,42 @@ function importLocalState(event) {
           );
         }
       } else {
-        state.manualRows = Array.isArray(payload.manualRows)
-          ? payload.manualRows
+        const localPayload =
+          payload.localState && typeof payload.localState === "object"
+            ? payload.localState
+            : payload;
+        state.manualRows = Array.isArray(localPayload.manualRows)
+          ? localPayload.manualRows
           : state.manualRows;
         state.rowOverrides =
-          payload.rowOverrides && typeof payload.rowOverrides === "object"
-            ? payload.rowOverrides
+          localPayload.rowOverrides && typeof localPayload.rowOverrides === "object"
+            ? localPayload.rowOverrides
             : state.rowOverrides;
         state.vendorContacts = mergeVendorSeeds(
-          payload.vendorContacts && typeof payload.vendorContacts === "object"
-            ? payload.vendorContacts
+          localPayload.vendorContacts && typeof localPayload.vendorContacts === "object"
+            ? localPayload.vendorContacts
             : state.vendorContacts,
         );
         state.productVendorMetrics =
-          payload.productVendorMetrics &&
-          typeof payload.productVendorMetrics === "object"
-            ? payload.productVendorMetrics
+          localPayload.productVendorMetrics &&
+          typeof localPayload.productVendorMetrics === "object"
+            ? localPayload.productVendorMetrics
             : state.productVendorMetrics;
-        state.deletedVendors = Array.isArray(payload.deletedVendors)
-          ? payload.deletedVendors
+        state.deletedVendors = Array.isArray(localPayload.deletedVendors)
+          ? localPayload.deletedVendors
           : state.deletedVendors;
+        state.poTokenLog = Array.isArray(localPayload.poTokenLog)
+          ? localPayload.poTokenLog
+          : state.poTokenLog;
+        state.reusableQueue = Array.isArray(localPayload.reusableQueue)
+          ? localPayload.reusableQueue
+          : state.reusableQueue;
+        state.poMaster = Array.isArray(localPayload.poMaster)
+          ? localPayload.poMaster
+          : state.poMaster;
+        state.activeReservations = Array.isArray(localPayload.activeReservations)
+          ? localPayload.activeReservations
+          : state.activeReservations;
         saveState();
         renderAll();
 
@@ -6048,6 +6562,391 @@ function saveMetricQuickAddForm(event) {
   renderAll();
 }
 
+function renderPoAvailability() {
+  const mount = document.getElementById("poAvailabilityContent");
+  if (!mount) return;
+  const available = getCurrentAvailablePO();
+  const stats = getPoAvailabilityStats();
+  const tokenRows = state.poTokenLog
+    .slice()
+    .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+  const queueRows = state.reusableQueue
+    .slice()
+    .sort((a, b) => {
+      const aStatus = normalizeReusableStatus(a.status) === "Available" ? 0 : 1;
+      const bStatus = normalizeReusableStatus(b.status) === "Available" ? 0 : 1;
+      if (aStatus !== bStatus) return aStatus - bStatus;
+      const aTime = new Date(a.cancelledOn || 0).getTime();
+      const bTime = new Date(b.cancelledOn || 0).getTime();
+      if (aTime !== bTime) return aTime - bTime;
+      return comparePoNumbers(a.poNumber, b.poNumber);
+    });
+
+  const tokenHtml = tokenRows.length
+    ? tokenRows
+        .map((token) => {
+          const status = normalizePoTokenStatus(token.status);
+          return `
+            <tr>
+              <td><strong>${escapeHtml(token.tokenNumber)}</strong></td>
+              <td>${escapeHtml(token.poNumber)}</td>
+              <td>${escapeHtml(token.takenBy || "—")}</td>
+              <td>${escapeHtml(normalizePoAvailabilityType(token.type))}</td>
+              <td>${escapeHtml(formatDateTime(token.timestamp))}</td>
+              <td>
+                <span class="availability-status ${poAvailabilityStatusClass(status)}">${escapeHtml(status)}</span>
+                ${
+                  status === "Active"
+                    ? `
+                      <div class="inline-actions availability-row-actions">
+                        <button class="primary-btn small-btn" type="button" data-po-availability-action="create-po" data-token="${escapeHtml(token.tokenNumber)}">Create PO</button>
+                        <button class="danger-btn small-btn" type="button" data-po-availability-action="cancel-token" data-token="${escapeHtml(token.tokenNumber)}">Cancel PO</button>
+                      </div>
+                    `
+                    : ""
+                }
+              </td>
+            </tr>
+          `;
+        })
+        .join("")
+    : `<tr><td colspan="6" class="empty-state">No PO tokens have been taken yet.</td></tr>`;
+
+  const queueHtml = queueRows.length
+    ? queueRows
+        .map((row) => {
+          const status = normalizeReusableStatus(row.status);
+          return `
+            <tr>
+              <td><strong>${escapeHtml(row.poNumber)}</strong></td>
+              <td>${escapeHtml(row.cancelledBy || "—")}</td>
+              <td>${escapeHtml(normalizePoAvailabilityType(row.type))}</td>
+              <td>${escapeHtml(formatDateTime(row.cancelledOn))}</td>
+              <td>${escapeHtml(row.reason || "—")}</td>
+              <td><span class="availability-status ${poAvailabilityStatusClass(status)}">${escapeHtml(status)}</span></td>
+            </tr>
+          `;
+        })
+        .join("")
+    : `<tr><td colspan="6" class="empty-state">No reusable PO numbers are waiting in the queue.</td></tr>`;
+
+  mount.innerHTML = `
+    <div class="po-availability-layout">
+      <article class="panel availability-current-panel">
+        <div class="panel-header wrap">
+          <div>
+            <h2>Current Available PO Number</h2>
+            <p class="section-copy">Reusable cancelled draft numbers are assigned first. New sequence numbers fill the gaps after that queue is empty.</p>
+          </div>
+          <button class="primary-btn" type="button" data-po-availability-action="take">Take PO Number</button>
+        </div>
+        <div class="availability-current-card">
+          <div>
+            <span>Current Available PO</span>
+            <strong>${escapeHtml(available.currentPo)}</strong>
+          </div>
+          <div>
+            <span>Next PO Number</span>
+            <strong>${escapeHtml(available.nextPo)}</strong>
+          </div>
+          <div>
+            <span>PO Type</span>
+            <strong>${escapeHtml(available.type)}</strong>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel availability-stats-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Allocation Status</h2>
+            <p class="section-copy">10 minute reservations are released automatically when they expire.</p>
+          </div>
+        </div>
+        <div class="availability-stat-grid">
+          <div><span>Active</span><strong>${stats.active}</strong></div>
+          <div><span>Submitted</span><strong>${stats.submitted}</strong></div>
+          <div><span>Reusable</span><strong>${stats.reusable}</strong></div>
+          <div><span>Unused</span><strong>${stats.expired}</strong></div>
+        </div>
+      </article>
+
+      <article class="panel availability-table-panel">
+        <div class="panel-header">
+          <div>
+            <h2>PO Token Log</h2>
+            <p class="section-copy">Every taken PO number is tracked with name, type, time, and status.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>PO Token Number</th>
+                <th>Taken PO Number</th>
+                <th>Taken By</th>
+                <th>Type</th>
+                <th>Date & Time</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>${tokenHtml}</tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel availability-table-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Reusable PO Queue</h2>
+            <p class="section-copy">Cancelled draft PO numbers return here and are reused in FIFO order.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>PO Number</th>
+                <th>Cancelled By</th>
+                <th>Type</th>
+                <th>Cancelled On</th>
+                <th>Reason</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>${queueHtml}</tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function openPoTokenModal() {
+  const available = getCurrentAvailablePO();
+  const form = document.getElementById("poTokenForm");
+  if (!form || !available.currentPo) return;
+  form.reset();
+  form.elements.poNumber.value = available.currentPo;
+  form.elements.poSource.value = available.type;
+  form.elements.requestType.value = "Marketplace";
+  document.getElementById("poTokenTitle").textContent =
+    `Take ${available.currentPo}`;
+  document.getElementById("poTokenSubtext").textContent =
+    `${available.type} PO number. Reservation expires in ${PO_RESERVATION_TIMEOUT_MINUTES} minutes.`;
+  document.getElementById("poTokenPreviewNumber").textContent =
+    available.currentPo;
+  document.getElementById("poTokenPreviewType").textContent = available.type;
+  document.getElementById("poTokenBackdrop")?.classList.remove("hidden");
+}
+
+function closePoTokenModal() {
+  document.getElementById("poTokenBackdrop")?.classList.add("hidden");
+}
+
+function createPOToken(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const takenBy = cleanText(form.elements.takenBy.value);
+  if (!takenBy) {
+    alert("Enter the name of the person taking this PO number.");
+    return;
+  }
+  const available = getCurrentAvailablePO();
+  const poNumber = cleanText(form.elements.poNumber.value || available.currentPo);
+  if (!poNumber || poNumber !== available.currentPo) {
+    alert("This PO number is no longer available. Please take the current available number.");
+    renderAll();
+    return;
+  }
+
+  const now = new Date();
+  const expiry = new Date(
+    now.getTime() + PO_RESERVATION_TIMEOUT_MINUTES * 60 * 1000,
+  );
+  const type = normalizePoAvailabilityType(form.elements.requestType.value);
+  const tokenNumber = generatePoTokenNumber();
+  const source = available.type;
+  state.poTokenLog.unshift({
+    tokenNumber,
+    poNumber,
+    takenBy,
+    type,
+    timestamp: now.toISOString(),
+    status: "Active",
+    notes: cleanText(form.elements.notes.value),
+    source,
+  });
+  state.activeReservations = state.activeReservations.filter(
+    (row) => cleanText(row.poNumber) !== poNumber,
+  );
+  state.activeReservations.push({
+    poNumber,
+    tokenNumber,
+    reservedBy: takenBy,
+    reservedAt: now.toISOString(),
+    expiryTime: expiry.toISOString(),
+    source,
+    type,
+  });
+  upsertPoMaster({
+    poNumber,
+    status: "Reserved",
+    createdBy: takenBy,
+    createdAt: now.toISOString(),
+    type,
+    isReusable: source === "Reusable",
+    tokenNumber,
+  });
+  if (source === "Reusable") {
+    const queueRow = state.reusableQueue.find(
+      (row) => cleanText(row.poNumber) === poNumber,
+    );
+    if (queueRow) {
+      queueRow.status = "Reserved";
+      queueRow.tokenNumber = tokenNumber;
+    }
+  }
+  saveState();
+  closePoTokenModal();
+  renderAll();
+}
+
+function openPoTokenCancelModal(tokenNumber) {
+  const token = getTokenByNumber(tokenNumber);
+  if (!token || normalizePoTokenStatus(token.status) !== "Active") {
+    alert("Only active PO reservations can be cancelled.");
+    return;
+  }
+  const form = document.getElementById("poTokenCancelForm");
+  form.reset();
+  form.elements.tokenNumber.value = token.tokenNumber;
+  document.getElementById("poTokenCancelTitle").textContent =
+    `Cancel ${token.poNumber}`;
+  document.getElementById("poTokenCancelSubtext").textContent =
+    `${token.tokenNumber} taken by ${token.takenBy || "Unknown"}`;
+  document
+    .getElementById("poTokenCancelBackdrop")
+    ?.classList.remove("hidden");
+}
+
+function closePoTokenCancelModal() {
+  document.getElementById("poTokenCancelBackdrop")?.classList.add("hidden");
+}
+
+function cancelPOToken(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const token = getTokenByNumber(form.elements.tokenNumber.value);
+  const reason = cleanText(form.elements.cancellationReason.value);
+  if (!token) {
+    alert("PO token not found. Refresh once and try again.");
+    return;
+  }
+  if (!reason) {
+    alert("Enter a cancellation reason.");
+    return;
+  }
+
+  const now = new Date().toISOString();
+  token.status = "Cancelled";
+  token.cancelledAt = now;
+  token.cancellationReason = reason;
+  state.activeReservations = state.activeReservations.filter(
+    (row) => cleanText(row.tokenNumber) !== cleanText(token.tokenNumber),
+  );
+  const queueEntry = {
+    poNumber: token.poNumber,
+    cancelledBy: token.takenBy || "",
+    type: normalizePoAvailabilityType(token.type),
+    cancelledOn: now,
+    reason,
+    status: "Available",
+    tokenNumber: token.tokenNumber,
+  };
+  const existingQueueIndex = state.reusableQueue.findIndex(
+    (row) => cleanText(row.poNumber) === cleanText(token.poNumber),
+  );
+  if (existingQueueIndex >= 0)
+    state.reusableQueue[existingQueueIndex] = {
+      ...state.reusableQueue[existingQueueIndex],
+      ...queueEntry,
+    };
+  else state.reusableQueue.push(queueEntry);
+  upsertPoMaster({
+    poNumber: token.poNumber,
+    status: "Cancelled",
+    createdBy: token.takenBy || "",
+    createdAt: token.timestamp || now,
+    type: normalizePoAvailabilityType(token.type),
+    isReusable: true,
+    tokenNumber: token.tokenNumber,
+  });
+
+  saveState();
+  closePoTokenCancelModal();
+  renderAll();
+}
+
+function markPoNumberSubmitted(poNumber) {
+  normalizeAvailabilityArrays();
+  const cleanPo = cleanText(poNumber);
+  if (!cleanPo) return;
+  const token = state.poTokenLog.find(
+    (row) =>
+      cleanText(row.poNumber) === cleanPo &&
+      normalizePoTokenStatus(row.status) === "Active",
+  );
+  if (!token) return;
+  const now = new Date().toISOString();
+  token.status = "Submitted";
+  token.submittedAt = now;
+  state.activeReservations = state.activeReservations.filter(
+    (row) => cleanText(row.poNumber) !== cleanPo,
+  );
+  const queueRow = state.reusableQueue.find(
+    (row) => cleanText(row.poNumber) === cleanPo,
+  );
+  if (queueRow) queueRow.status = "Used";
+  upsertPoMaster({
+    poNumber: cleanPo,
+    status: "Submitted",
+    createdBy: token.takenBy || "",
+    createdAt: token.timestamp || now,
+    type: normalizePoAvailabilityType(token.type),
+    isReusable: false,
+    tokenNumber: token.tokenNumber,
+  });
+}
+
+function poNumberExistsForAnotherPO(poNumber, existingPo = null) {
+  const cleanPo = cleanText(poNumber);
+  if (!cleanPo) return false;
+  return buildDerived().pos.some(
+    (po) =>
+      cleanText(po.poNumber) === cleanPo &&
+      cleanText(po.poKey) !== cleanText(existingPo?.poKey || existingPo?.poNumber),
+  );
+}
+
+function handlePoAvailabilityAction(event) {
+  const button = event.target.closest("[data-po-availability-action]");
+  if (!button) return;
+  const action = button.dataset.poAvailabilityAction;
+  if (action === "take") {
+    openPoTokenModal();
+    return;
+  }
+  const token = getTokenByNumber(button.dataset.token);
+  if (action === "cancel-token") {
+    openPoTokenCancelModal(button.dataset.token);
+    return;
+  }
+  if (action === "create-po" && token) {
+    openPoModal(null, { poNumber: token.poNumber });
+  }
+}
+
 function renderAll() {
   const derived = buildDerived();
   renderKpis(derived);
@@ -6059,6 +6958,7 @@ function renderAll() {
   renderVendors(derived);
   renderMetricProducts(derived);
   renderFollowups(derived);
+  renderPoAvailability(derived);
 }
 
 function bindTabs() {
@@ -6217,6 +7117,38 @@ function bindGlobalEvents() {
   document
     .getElementById("followupMailForm")
     ?.addEventListener("submit", queueFollowupMail);
+  document
+    .getElementById("poAvailabilityContent")
+    ?.addEventListener("click", handlePoAvailabilityAction);
+  document
+    .getElementById("closePoTokenModalBtn")
+    ?.addEventListener("click", closePoTokenModal);
+  document
+    .getElementById("cancelPoTokenBtn")
+    ?.addEventListener("click", closePoTokenModal);
+  document
+    .getElementById("poTokenBackdrop")
+    ?.addEventListener("click", (event) => {
+      if (event.target.id === "poTokenBackdrop") closePoTokenModal();
+    });
+  document
+    .getElementById("poTokenForm")
+    ?.addEventListener("submit", createPOToken);
+  document
+    .getElementById("closePoTokenCancelModalBtn")
+    ?.addEventListener("click", closePoTokenCancelModal);
+  document
+    .getElementById("cancelPoTokenCancelBtn")
+    ?.addEventListener("click", closePoTokenCancelModal);
+  document
+    .getElementById("poTokenCancelBackdrop")
+    ?.addEventListener("click", (event) => {
+      if (event.target.id === "poTokenCancelBackdrop")
+        closePoTokenCancelModal();
+    });
+  document
+    .getElementById("poTokenCancelForm")
+    ?.addEventListener("submit", cancelPOToken);
 
   document.getElementById("addLineBtn").addEventListener("click", () => {
     document
@@ -6418,6 +7350,7 @@ async function init() {
   bindTabs();
   bindFilters();
   bindGlobalEvents();
+  startPoAvailabilityAutoReleaseTimer();
   if (useSupabase) {
     await refreshStateFromSupabase({ generateFollowups: true });
     return;
