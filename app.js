@@ -36,25 +36,12 @@ const PRODUCT_SORTS = [
 ];
 
 const PO_SORTS = [
-  { value: "poDate-desc", label: "Sort: Latest PO Date" },
-  { value: "poDate-asc", label: "Sort: Oldest PO Date" },
-  { value: "deliveryDate-desc", label: "Sort: Latest Delivery Date" },
-  { value: "deliveryDate-asc", label: "Sort: Earliest Delivery Date" },
-  { value: "poTotal-desc", label: "Sort: Highest PO Value" },
-  { value: "poTotal-asc", label: "Sort: Lowest PO Value" },
-  { value: "productCount-desc", label: "Sort: Most Product Lines" },
-  { value: "productCount-asc", label: "Sort: Fewest Product Lines" },
-  { value: "totalQty-desc", label: "Sort: Highest Total Qty" },
-  { value: "totalQty-asc", label: "Sort: Lowest Total Qty" },
-  { value: "vendorName-asc", label: "Sort: Vendor A to Z" },
-  { value: "vendorName-desc", label: "Sort: Vendor Z to A" },
-  { value: "paymentStatus-asc", label: "Sort: Payment Status" },
-  { value: "poStatus-asc", label: "Sort: PO Status" },
-  { value: "deliveryStatus-asc", label: "Sort: Delivery Status" },
-  { value: "poNumber-asc", label: "Sort: PO Number A to Z" },
-  { value: "poNumber-desc", label: "Sort: PO Number Z to A" },
-  { value: "source-asc", label: "Sort: Source A to Z" },
-  { value: "gstin-asc", label: "Sort: GSTIN A to Z" },
+  { value: "poDate-desc", label: "Newest first" },
+  { value: "poDate-asc", label: "Oldest first" },
+  { value: "deliveryDate-asc", label: "Delivery due soon" },
+  { value: "poTotal-desc", label: "Highest value" },
+  { value: "poTotal-asc", label: "Lowest value" },
+  { value: "vendorName-asc", label: "Vendor A-Z" },
 ];
 
 const VENDOR_SORTS = [
@@ -280,18 +267,76 @@ const state = {
 };
 
 const snsConfig = window.SNS_CONFIG || {};
-const useSupabase = Boolean(
-  snsConfig.useSupabase &&
-  snsConfig.supabaseUrl &&
-  snsConfig.supabaseAnonKey &&
-  window.supabase?.createClient,
-);
-const supabaseClient = useSupabase
-  ? window.supabase.createClient(
+let useSupabase = false;
+let supabaseClient = null;
+let supabaseSdkLoadPromise = null;
+
+function hasSupabaseConfig() {
+  return Boolean(
+    snsConfig.useSupabase && snsConfig.supabaseUrl && snsConfig.supabaseAnonKey,
+  );
+}
+
+function createSupabaseClientIfReady() {
+  if (!hasSupabaseConfig() || !window.supabase?.createClient) return false;
+  if (!supabaseClient) {
+    supabaseClient = window.supabase.createClient(
       snsConfig.supabaseUrl,
       snsConfig.supabaseAnonKey,
-    )
-  : null;
+    );
+  }
+  useSupabase = true;
+  return true;
+}
+
+function loadSupabaseSdk() {
+  if (createSupabaseClientIfReady()) return Promise.resolve(true);
+  if (!hasSupabaseConfig()) return Promise.resolve(false);
+  if (supabaseSdkLoadPromise) return supabaseSdkLoadPromise;
+
+  supabaseSdkLoadPromise = new Promise((resolve) => {
+    const existing = document.querySelector("script[data-supabase-sdk]");
+    const done = (ready) => {
+      const clientReady = ready && createSupabaseClientIfReady();
+      if (clientReady) {
+        queueConfig.enabled = Boolean(snsConfig.useQueueProcessor && useSupabase);
+      }
+      resolve(clientReady);
+    };
+    if (existing) {
+      existing.addEventListener("load", () => done(true), { once: true });
+      existing.addEventListener("error", () => done(false), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+    script.async = true;
+    script.dataset.supabaseSdk = "true";
+    const timeout = window.setTimeout(() => done(false), 4500);
+    script.addEventListener(
+      "load",
+      () => {
+        window.clearTimeout(timeout);
+        done(true);
+      },
+      { once: true },
+    );
+    script.addEventListener(
+      "error",
+      () => {
+        window.clearTimeout(timeout);
+        done(false);
+      },
+      { once: true },
+    );
+    document.head.appendChild(script);
+  });
+
+  return supabaseSdkLoadPromise;
+}
+
+createSupabaseClientIfReady();
 const queueConfig = {
   enabled: Boolean(snsConfig.useQueueProcessor && useSupabase),
   table: cleanConfigText(snsConfig.queueTable) || "incoming_po_queue",
@@ -4797,6 +4842,516 @@ function setSelectOptions(
   });
 }
 
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function daysBetween(start, end) {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const a = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const b = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  return Math.round((b - a) / dayMs);
+}
+
+function compactMoney(value) {
+  const amount = number(value);
+  const abs = Math.abs(amount);
+  if (abs >= 10000000) return `Rs\u00a0${(amount / 10000000).toFixed(2)}\u00a0Cr`;
+  if (abs >= 100000) return `Rs\u00a0${(amount / 100000).toFixed(2)}\u00a0L`;
+  if (abs >= 1000) return `Rs\u00a0${(amount / 1000).toFixed(1)}\u00a0K`;
+  return money(amount);
+}
+
+function activePOs(pos) {
+  return pos.filter((po) => {
+    const status = normalizeKey(po.poStatus);
+    return status !== "CLOSED" && status !== "CANCELLED";
+  });
+}
+
+function getDeliveryDate(po) {
+  return parseDateOnly(po?.deliveryDate);
+}
+
+function upcomingPOs(pos) {
+  const today = todayDateOnly();
+  const limit = addDays(today, 7);
+  return pos
+    .filter((po) => {
+      if (displayDeliveryStatus(po) === "Delivered") return false;
+      const due = getDeliveryDate(po);
+      return due && due >= today && due <= limit;
+    })
+    .sort((a, b) => getDeliveryDate(a) - getDeliveryDate(b));
+}
+
+function delayedPOs(pos) {
+  return pos
+    .filter((po) => isPoDelayed(po))
+    .sort((a, b) => getDelayDays(b) - getDelayDays(a));
+}
+
+function getDelayDays(po) {
+  const due = getDeliveryDate(po);
+  if (!due) return 0;
+  return Math.max(0, daysBetween(due, todayDateOnly()));
+}
+
+function getDelaySeverity(delayDays) {
+  if (delayDays > 7) return "Overdue";
+  if (delayDays >= 3) return "At Risk";
+  return "Monitor";
+}
+
+function getDaysLeftLabel(po) {
+  const due = getDeliveryDate(po);
+  if (!due) return "No date";
+  const days = daysBetween(todayDateOnly(), due);
+  if (days < 0) return `${Math.abs(days)}d late`;
+  if (days === 0) return "Today";
+  if (days === 1) return "1 Day";
+  return `${days} Days`;
+}
+
+function daysLeftClass(po) {
+  const due = getDeliveryDate(po);
+  if (!due) return "neutral";
+  const days = daysBetween(todayDateOnly(), due);
+  if (days <= 1) return "danger";
+  if (days <= 3) return "warning";
+  if (days <= 7) return "notice";
+  return "good";
+}
+
+function pendingApprovalPOs(pos) {
+  return activePOs(pos)
+    .filter((po) => normalizeKey(po.poStatus) === "ISSUED")
+    .sort((a, b) => number(b.poTotal) - number(a.poTotal));
+}
+
+function countBy(items, getLabel) {
+  return items.reduce((acc, item) => {
+    const key = getLabel(item) || "Unknown";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function getPaymentTotals(pos) {
+  return pos.reduce(
+    (acc, po) => {
+      const derived = derivePaymentState(
+        number(po.poTotal),
+        number(po.amountPaid),
+        po.balanceDue,
+      );
+      acc.totalValue += number(po.poTotal);
+      acc.totalSpent += number(derived.amountPaid);
+      acc.totalOutstanding += number(derived.balanceDue);
+      return acc;
+    },
+    { totalValue: 0, totalSpent: 0, totalOutstanding: 0 },
+  );
+}
+
+function donutSummaryHtml({
+  totalLabel,
+  totalValue,
+  items,
+  valueFormatter = formatNumber,
+}) {
+  const colors = ["#29a34a", "#1f8edb", "#f5c400", "#f04f4f", "#8f5bd6"];
+  const total = items.reduce((sum, item) => sum + number(item.value), 0) || 1;
+  let cursor = 0;
+  const stops = items
+    .map((item, index) => {
+      const start = cursor;
+      const end = cursor + (number(item.value) / total) * 100;
+      cursor = end;
+      const color = item.color || colors[index % colors.length];
+      return `${color} ${start}% ${end}%`;
+    })
+    .join(", ");
+  const gradient = stops || "#2a2a2a 0% 100%";
+  return `
+    <div class="donut-chart" style="background:conic-gradient(${gradient});">
+      <div>
+        <strong>${escapeHtml(totalValue)}</strong>
+        <span>${escapeHtml(totalLabel)}</span>
+      </div>
+    </div>
+    <div class="donut-legend">
+      ${items
+        .map((item, index) => {
+          const color = item.color || colors[index % colors.length];
+          const percent = Math.round((number(item.value) / total) * 100);
+          return `
+            <div class="legend-row">
+              <span class="legend-dot" style="background:${color}"></span>
+              <span>${escapeHtml(item.label)}</span>
+              <strong>${escapeHtml(valueFormatter(item.value))} (${percent}%)</strong>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function paymentSummaryHtml({ totalSpent, totalValue, totalOutstanding }) {
+  const safeTotal = Math.max(1, number(totalValue));
+  const spentPercent = Math.round((number(totalSpent) / safeTotal) * 100);
+  const outstandingPercent = Math.max(0, 100 - spentPercent);
+  const gradient = `#29a34a 0% ${spentPercent}%, #f5c400 ${spentPercent}% 100%`;
+
+  return `
+    <div class="payment-donut-wrap">
+      <div class="donut-chart payment-spend-chart" style="background:conic-gradient(${gradient});">
+        <div>
+          <strong>${escapeHtml(compactMoney(totalSpent))}</strong>
+          <span>Total Spent</span>
+        </div>
+      </div>
+      <div class="payment-clearance">${escapeHtml(formatNumber(spentPercent))}% cleared</div>
+    </div>
+    <div class="payment-breakdown">
+      <div class="payment-breakdown-row primary">
+        <span><i style="background:#29a34a"></i>Total spent</span>
+        <strong>${escapeHtml(compactMoney(totalSpent))}</strong>
+      </div>
+      <div class="payment-breakdown-row">
+        <span><i style="background:#f5c400"></i>Total PO value</span>
+        <strong>${escapeHtml(compactMoney(totalValue))}</strong>
+      </div>
+      <div class="payment-breakdown-row muted">
+        <span><i style="background:rgba(255,255,255,.32)"></i>Remaining balance</span>
+        <strong>${escapeHtml(compactMoney(totalOutstanding))} (${escapeHtml(formatNumber(outstandingPercent))}%)</strong>
+      </div>
+    </div>
+  `;
+}
+
+function kpiIconSvg(icon) {
+  const icons = {
+    file: `
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+      <path d="M14 2v6h6"></path>
+      <path d="M8 13h8"></path>
+      <path d="M8 17h6"></path>
+    `,
+    truck: `
+      <path d="M10 17h4V5H2v12h3"></path>
+      <path d="M14 8h4l4 4v5h-3"></path>
+      <circle cx="7" cy="17" r="2"></circle>
+      <circle cx="17" cy="17" r="2"></circle>
+    `,
+    alert: `
+      <path d="m21.7 18-8.9-15a1 1 0 0 0-1.7 0L2.3 18a1 1 0 0 0 .9 1.5h17.6a1 1 0 0 0 .9-1.5z"></path>
+      <path d="M12 8v5"></path>
+      <path d="M12 17h.01"></path>
+    `,
+    shield: `
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+      <path d="m9 12 2 2 4-5"></path>
+    `,
+    wallet: `
+      <path d="M19 7V6a2 2 0 0 0-2-2H5a3 3 0 0 0 0 6h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H5a3 3 0 0 1-3-3V7"></path>
+      <path d="M16 14h.01"></path>
+      <path d="M8 12h4"></path>
+      <path d="M10 12c2 0 2-4 0-4H8"></path>
+      <path d="M8 8h5"></path>
+      <path d="M8 10h5"></path>
+    `,
+  };
+  return `
+    <svg class="kpi-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      ${icons[icon] || icons.file}
+    </svg>
+  `;
+}
+
+function overviewTableHtml(headers, rows, emptyText) {
+  if (!rows.length)
+    return `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+  return `
+    <table>
+      <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+      <tbody>
+        ${rows
+          .map(
+            (row) =>
+              `<tr>${row
+                .map((cell) =>
+                  String(cell).startsWith("<")
+                    ? `<td>${cell}</td>`
+                    : `<td>${escapeHtml(cell)}</td>`,
+                )
+                .join("")}</tr>`,
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderCommandKpis({ pos }) {
+  const active = activePOs(pos);
+  const upcoming = upcomingPOs(pos);
+  const delayed = delayedPOs(pos);
+  const approvals = pendingApprovalPOs(pos);
+  const paymentTotals = getPaymentTotals(pos);
+  const cards = [
+    {
+      label: "Total Active POs",
+      value: formatNumber(active.length),
+      note: `${pos.length} total purchase orders`,
+      tone: "blue",
+      icon: "file",
+    },
+    {
+      label: "Upcoming Deliveries",
+      value: formatNumber(upcoming.length),
+      note: "Due within 7 days",
+      tone: "green",
+      icon: "truck",
+    },
+    {
+      label: "Delayed POs",
+      value: formatNumber(delayed.length),
+      note: "Need follow-up attention",
+      tone: "red",
+      icon: "alert",
+    },
+    {
+      label: "Pending Approvals",
+      value: formatNumber(approvals.length),
+      note: "Issued POs awaiting closure",
+      tone: "purple",
+      icon: "shield",
+    },
+    {
+      label: "Total Spent",
+      value: compactMoney(paymentTotals.totalSpent),
+      note: "Paid across purchase orders",
+      tone: "green",
+      icon: "wallet",
+    },
+  ];
+  document.getElementById("kpiGrid").innerHTML = cards
+    .map(
+      (card) => `
+    <article class="kpi-card kpi-${escapeHtml(card.tone)}">
+      <div class="kpi-icon">${kpiIconSvg(card.icon)}</div>
+      <div class="kpi-content">
+        <div class="kpi-label">
+          <span>${escapeHtml(card.label)}</span>
+        </div>
+        <div class="kpi-value">${escapeHtml(card.value)}</div>
+        <div class="kpi-note">${escapeHtml(card.note)}</div>
+      </div>
+    </article>
+  `,
+    )
+    .join("");
+}
+
+function renderCommandOverview({ pos, vendors }) {
+  const maxSpend =
+    Math.max(...vendors.map((vendor) => vendor.totalSpend), 0) || 1;
+  const totalVendorSpend = vendors.reduce(
+    (sum, vendor) => sum + number(vendor.totalSpend),
+    0,
+  );
+  const topVendors = sortData(vendors, "totalSpend-desc").slice(0, 5);
+
+  document.getElementById("vendorSpendBars").innerHTML =
+    topVendors
+      .map(
+        (vendor) => `
+    <div class="bar-row">
+      <div class="bar-label">
+        <span>${escapeHtml(vendor.vendorName)}</span>
+        <span>${compactMoney(vendor.totalSpend)}</span>
+        <span>${Math.round((number(vendor.totalSpend) / (totalVendorSpend || 1)) * 100)}%</span>
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:${Math.max((vendor.totalSpend / maxSpend) * 100, 3)}%"></div>
+      </div>
+    </div>
+  `,
+      )
+      .join("") || `<div class="empty-state">No vendor spend data.</div>`;
+
+  const poStatusCounts = countBy(pos, (po) => {
+    if (isPoDelayed(po)) return "Delayed";
+    const status = normalizeKey(po.poStatus);
+    if (status === "CLOSED") return "Closed";
+    if (status === "BILLED") return "Confirmed";
+    if (status === "ISSUED") return "In Progress";
+    return cleanText(po.poStatus) || "Pending";
+  });
+  const poStatusItems = [
+    ["Confirmed", "#29a34a"],
+    ["In Progress", "#1f8edb"],
+    ["Pending", "#f5c400"],
+    ["Delayed", "#f04f4f"],
+    ["Closed", "#8f5bd6"],
+  ]
+    .map(([label, color]) => ({
+      label,
+      color,
+      value: poStatusCounts[label] || 0,
+    }))
+    .filter((item) => item.value > 0);
+  document.getElementById("poStatusSummary").innerHTML = donutSummaryHtml({
+    totalLabel: "Total POs",
+    totalValue: formatNumber(pos.length),
+    items: poStatusItems,
+  });
+
+  const paymentTotals = getPaymentTotals(pos);
+  document.getElementById("paymentSummary").innerHTML =
+    paymentSummaryHtml(paymentTotals);
+
+  const upcoming = upcomingPOs(pos).slice(0, 5);
+  document.getElementById("upcomingDeliveries").innerHTML = overviewTableHtml(
+    ["PO Number", "Vendor", "Item / Description", "Due Date", "Days Left"],
+    upcoming.map((po) => [
+      po.poNumber,
+      po.vendorName,
+      po.groupedItems?.[0]?.itemDesc || po.items?.[0]?.itemDesc || "Material",
+      formatDate(po.deliveryDate),
+      `<span class="days-pill ${daysLeftClass(po)}">${escapeHtml(getDaysLeftLabel(po))}</span>`,
+    ]),
+    "No deliveries due in the next 7 days.",
+  );
+
+  const delayed = delayedPOs(pos).slice(0, 5);
+  document.getElementById("delayedPOs").innerHTML = overviewTableHtml(
+    ["PO Number", "Vendor", "Delay Days", "Status"],
+    delayed.map((po) => {
+      const delayDays = getDelayDays(po);
+      const severity = getDelaySeverity(delayDays);
+      return [
+        po.poNumber,
+        po.vendorName,
+        formatNumber(delayDays),
+        `<span class="risk-pill ${normalizeKey(severity).toLowerCase()}">${escapeHtml(severity)}</span>`,
+      ];
+    }),
+    "No delayed purchase orders.",
+  );
+
+  const approvals = pendingApprovalPOs(pos).slice(0, 5);
+  document.getElementById("pendingApprovals").innerHTML = overviewTableHtml(
+    ["PO Number", "Requested By", "Amount"],
+    approvals.map((po) => [po.poNumber, po.vendorName, compactMoney(po.poTotal)]),
+    "No pending approval-style POs.",
+  );
+
+  renderRecentActivity(pos);
+  renderQuickInsights(pos, vendors);
+}
+
+function renderRecentActivity(pos) {
+  const activities = [];
+  delayedPOs(pos)
+    .slice(0, 2)
+    .forEach((po) =>
+      activities.push({
+        tone: "red",
+        title: `${po.poNumber} marked as Delayed`,
+        meta: po.vendorName,
+        time: `${getDelayDays(po)} days late`,
+      }),
+    );
+  sortData(pos, "poDate-desc")
+    .slice(0, 3)
+    .forEach((po) =>
+      activities.push({
+        tone: paymentProgressStatus(po) === "Paid" ? "green" : "blue",
+        title:
+          paymentProgressStatus(po) === "Paid"
+            ? `${po.poNumber} payment completed`
+            : `Invoice received for ${po.poNumber}`,
+        meta: po.vendorName,
+        time: formatDate(po.poDate),
+      }),
+    );
+  (state.followups || [])
+    .slice(0, 2)
+    .forEach((row) =>
+      activities.push({
+        tone: "purple",
+        title: "Follow-up reminder sent",
+        meta: `${row.vendor_name || row.vendorName || "Vendor"} (${row.po_number || row.poNumber || "PO"})`,
+        time: row.due_date ? formatDate(row.due_date) : "Follow-up",
+      }),
+    );
+
+  document.getElementById("recentActivity").innerHTML = activities.length
+    ? activities
+        .slice(0, 5)
+        .map(
+          (activity) => `
+        <div class="activity-card">
+          <span class="activity-icon ${escapeHtml(activity.tone)}">${escapeHtml(activity.title.slice(0, 1))}</span>
+          <div>
+            <strong>${escapeHtml(activity.title)}</strong>
+            <small>${escapeHtml(activity.meta)}</small>
+            <span>${escapeHtml(activity.time)}</span>
+          </div>
+        </div>
+      `,
+        )
+        .join("")
+    : '<div class="empty-state">No recent activity yet.</div>';
+}
+
+function renderQuickInsights(pos, vendors) {
+  const datedLeadTimes = pos
+    .map((po) => {
+      const start = parseDateOnly(po.poDate);
+      const end = getDeliveryDate(po);
+      return start && end ? Math.max(0, daysBetween(start, end)) : null;
+    })
+    .filter((value) => value !== null);
+  const avgLeadTime = datedLeadTimes.length
+    ? datedLeadTimes.reduce((sum, value) => sum + value, 0) /
+      datedLeadTimes.length
+    : 0;
+  const onTimeRate = pos.length
+    ? Math.round(((pos.length - delayedPOs(pos).length) / pos.length) * 100)
+    : 0;
+  const delayVendorCounts = countBy(delayedPOs(pos), (po) => po.vendorName);
+  const mostDelayedVendor =
+    Object.entries(delayVendorCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ||
+    "None";
+  const activeValue = activePOs(pos).reduce(
+    (sum, po) => sum + number(po.poTotal),
+    0,
+  );
+  const insights = [
+    ["Average Lead Time", `${avgLeadTime.toFixed(1)} Days`],
+    ["On-Time Delivery Rate", `${onTimeRate}%`],
+    ["Most Delayed Vendor", mostDelayedVendor],
+    ["Total Vendors", formatNumber(vendors.length)],
+    ["Active POs Value", compactMoney(activeValue)],
+  ];
+  document.getElementById("quickInsights").innerHTML = insights
+    .map(
+      ([label, value]) => `
+      <div class="insight-row">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+      </div>
+    `,
+    )
+    .join("");
+}
+
 function renderKpis({ pos, vendors, products, rows }) {
   const totalPOValue = pos.reduce((sum, po) => sum + number(po.poTotal), 0);
   const openPaymentValue = pos.reduce((sum, po) => {
@@ -5183,6 +5738,9 @@ function renderPurchaseOrders({ pos }) {
     ? state.filters.poDelivery
     : "all";
   state.filters.poDelivery = selectedDeliveryFilter;
+  if (!PO_SORTS.some((option) => option.value === state.filters.poSort)) {
+    state.filters.poSort = "poDate-desc";
+  }
 
   setSelectOptions(
     "poVendorFilter",
@@ -6949,10 +7507,8 @@ function handlePoAvailabilityAction(event) {
 
 function renderAll() {
   const derived = buildDerived();
-  renderKpis(derived);
-  renderOverview(derived);
-  renderStatusMix(derived.pos, "paymentMix", "paymentStatus");
-  renderStatusMix(derived.pos, "deliveryMix", "deliveryStatus");
+  renderCommandKpis(derived);
+  renderCommandOverview(derived);
   renderPurchaseOrders(derived);
   renderProducts(derived);
   renderVendors(derived);
@@ -7215,7 +7771,7 @@ function bindGlobalEvents() {
   document.getElementById("poList").addEventListener("click", handlePoAction);
   document
     .getElementById("recentPOs")
-    .addEventListener("click", handlePoAction);
+    ?.addEventListener("click", handlePoAction);
   document
     .getElementById("detailModalContent")
     .addEventListener("click", handlePoAction);
@@ -7351,11 +7907,10 @@ async function init() {
   bindFilters();
   bindGlobalEvents();
   startPoAvailabilityAutoReleaseTimer();
-  if (useSupabase) {
-    await refreshStateFromSupabase({ generateFollowups: true });
-    return;
-  }
   renderAll();
+  if (hasSupabaseConfig() && (useSupabase || (await loadSupabaseSdk()))) {
+    await refreshStateFromSupabase({ generateFollowups: true });
+  }
 }
 
 window.addEventListener("DOMContentLoaded", () => {
