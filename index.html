@@ -8,100 +8,161 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
 </head>
 <body>
-  <div class="app-shell">
-    
-    <header class="launch-header">
-      <div class="launch-header-main">
-        <div class="brand-stack">
-          <div class="brand-copy">
-            <div class="brand-inline">
-              <img src="stacknstock-logo.png" alt="Stack n Stock logo" class="brand-inline-logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';" />
-              <span class="brand-inline-fallback" style="display:none;">STACK N STOCK</span>
-            </div>
-            <h1>Procurement Hub</h1>
-            <p class="subtitle">Manage purchase orders, delivery, payments, vendors, and sourcing decisions from one clean workspace.</p>
-          </div>
-        </div>
-
-        <div class="launch-actions">
-          <button class="primary-btn launch-primary" id="openAddPoBtn">+ Add Purchase Order</button>
-          <div class="utility-actions">
-            <button class="ghost-btn" id="processQueueBtn">Process Queue</button>
-            <button class="ghost-btn" id="exportStateBtn">Export Local</button>
-            <button class="ghost-btn" id="exportFullDataBtn">Export Full</button>
-            <label class="ghost-btn file-btn">
-              Import Data
-              <input type="file" id="importStateInput" accept="application/json" hidden />
-            </label>
-          </div>
+  <div class="app-shell dashboard-shell">
+    <aside class="app-sidebar" aria-label="Procurement navigation">
+      <div class="sidebar-brand">
+        <img src="stacknstock-logo.png" alt="Stack n Stock logo" class="sidebar-logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-flex';" />
+        <span class="sidebar-logo-fallback" style="display:none;">S</span>
+        <div>
+          <strong>Procurement Hub</strong>
+          <span>Stack n Stock</span>
         </div>
       </div>
-    </header>
 
+      <nav class="tabs sidebar-tabs">
+        <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="purchase-orders">Purchase Orders</button>
+        <button class="tab" data-tab="products">Products</button>
+        <button class="tab" data-tab="vendors">Vendors</button>
+        <button class="tab" data-tab="vendor-metrics">Vendor Metrics</button>
+        <button class="tab" data-tab="follow-ups">Follow-ups</button>
+        <button class="tab" data-tab="po-availability">PO Availability</button>
+      </nav>
 
-    <section class="kpi-grid" id="kpiGrid"></section>
+      <div class="sidebar-help">
+        <span>Need Help?</span>
+        <strong>Contact Support</strong>
+      </div>
+    </aside>
 
-    <nav class="tabs">
-      <button class="tab active" data-tab="overview">Overview</button>
-      <button class="tab" data-tab="purchase-orders">Purchase Orders</button>
-      <button class="tab" data-tab="products">Products</button>
-      <button class="tab" data-tab="vendors">Vendors</button>
-      <button class="tab" data-tab="vendor-metrics">Vendor Metrics</button>
-      <button class="tab" data-tab="follow-ups">Follow-ups</button>
-      <button class="tab" data-tab="po-availability">PO Number Availability</button>
-    </nav>
-
-    <main>
+    <div class="app-workspace">
+      <main>
       <section class="tab-panel active" id="overview">
-        <div class="overview-grid">
-          <article class="panel">
+        <div class="tab-page-header">
+          <div>
+            <h1>Overview</h1>
+            <p>A quick overview of your procurement operations</p>
+          </div>
+        </div>
+        <section class="kpi-grid" id="kpiGrid"></section>
+        <div class="overview-grid command-overview-grid">
+          <article class="panel po-status-panel">
             <div class="panel-header">
               <div>
-                <h2>Recent Purchase Orders</h2>
-                <p class="section-copy">Latest PO summaries with quick item access.</p>
+                <h2>PO Status Summary</h2>
+                <p class="section-copy">Distribution across active procurement stages.</p>
               </div>
             </div>
-            <div id="recentPOs" class="stack-list"></div>
+            <div id="poStatusSummary" class="donut-summary"></div>
           </article>
 
-          <article class="panel">
+          <article class="panel vendor-value-panel">
             <div class="panel-header">
               <div>
-                <h2>Vendor Spend</h2>
-                <p class="section-copy">Top vendors by PO value.</p>
+                <h2>Top Vendors by PO Value</h2>
+                <p class="section-copy">Largest vendor concentration by total value.</p>
               </div>
+              <button class="ghost-btn small-btn" data-tab-jump="vendors" type="button">View All</button>
             </div>
             <div id="vendorSpendBars" class="bar-list"></div>
           </article>
 
-          <article class="panel">
+          <article class="panel payment-summary-panel">
             <div class="panel-header">
               <div>
-                <h2>Payment Mix</h2>
-                <p class="section-copy">All purchase orders grouped by payment status.</p>
+                <h2>Payment Summary</h2>
+                <p class="section-copy">Total spend across purchase orders.</p>
               </div>
             </div>
-            <div id="paymentMix" class="status-grid"></div>
+            <div id="paymentSummary" class="donut-summary"></div>
           </article>
 
-          <article class="panel">
-            <div class="panel-header">
+          <article class="panel table-panel upcoming-panel">
+            <div class="panel-header compact-header">
               <div>
-                <h2>Delivery Mix</h2>
-                <p class="section-copy">Delivery status at PO level.</p>
+                <h2>Upcoming Deliveries</h2>
+                <p class="section-copy">Due within the next 7 days.</p>
+              </div>
+              <button class="ghost-btn small-btn" data-tab-jump="purchase-orders" type="button">View All</button>
+            </div>
+            <div id="upcomingDeliveries" class="overview-table"></div>
+          </article>
+
+          <article class="panel table-panel delayed-panel">
+            <div class="panel-header compact-header">
+              <div>
+                <h2>Delayed POs</h2>
+                <p class="section-copy">Purchase orders beyond delivery date.</p>
+              </div>
+              <button class="ghost-btn small-btn" data-tab-jump="follow-ups" type="button">View All</button>
+            </div>
+            <div id="delayedPOs" class="overview-table"></div>
+          </article>
+
+          <article class="panel table-panel approvals-panel">
+            <div class="panel-header compact-header">
+              <div>
+                <h2>Pending Approvals</h2>
+                <p class="section-copy">Open approval-style procurement actions.</p>
+              </div>
+              <button class="ghost-btn small-btn" data-tab-jump="purchase-orders" type="button">View All</button>
+            </div>
+            <div id="pendingApprovals" class="overview-table"></div>
+          </article>
+
+          <article class="panel recent-activity-panel">
+            <div class="panel-header compact-header">
+              <div>
+                <h2>Recent Activity</h2>
+                <p class="section-copy">Latest operational movements.</p>
+              </div>
+              <button class="ghost-btn small-btn" data-tab-jump="purchase-orders" type="button">View All</button>
+            </div>
+            <div id="recentActivity" class="activity-strip"></div>
+          </article>
+
+          <article class="panel quick-insights-panel">
+            <div class="panel-header compact-header">
+              <div>
+                <h2>Quick Insights</h2>
+                <p class="section-copy">Procurement health at a glance.</p>
               </div>
             </div>
-            <div id="deliveryMix" class="status-grid"></div>
+            <div id="quickInsights" class="insight-list"></div>
           </article>
         </div>
       </section>
 
       <section class="tab-panel" id="purchase-orders">
         <article class="panel">
+          <div class="po-command-panel">
+            <div class="po-command-title">
+              <span>PO workspace</span>
+              <strong>Create, process, and move purchase order data.</strong>
+            </div>
+            <div class="po-command-primary">
+              <select class="control-input compact-select" id="overviewPeriodFilter" aria-label="Purchase order time period">
+                <option>This Month</option>
+                <option>This Week</option>
+                <option>Today</option>
+                <option>All Time</option>
+              </select>
+              <button class="primary-btn" id="openAddPoBtn">Add Purchase Order</button>
+            </div>
+            <div class="command-utility-row po-data-tools" aria-label="Purchase order data tools">
+              <button class="ghost-btn" id="processQueueBtn">Process Queue</button>
+              <button class="ghost-btn" id="exportStateBtn">Export Local</button>
+              <button class="ghost-btn" id="exportFullDataBtn">Export Full</button>
+              <label class="ghost-btn file-btn">
+                Import Data
+                <input type="file" id="importStateInput" accept="application/json" hidden />
+              </label>
+            </div>
+          </div>
+
           <div class="panel-header wrap">
             <div>
               <h2>Purchase Orders</h2>
@@ -243,7 +304,8 @@
       <section class="tab-panel" id="po-availability">
         <div id="poAvailabilityContent"></div>
       </section>
-    </main>
+      </main>
+    </div>
   </div>
 
   <div class="modal-backdrop hidden" id="poModalBackdrop">
