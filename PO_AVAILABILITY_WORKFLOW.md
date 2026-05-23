@@ -87,9 +87,9 @@ TRUNCATE TABLE public.po_token_log RESTART IDENTITY CASCADE;
 TRUNCATE TABLE public.reusable_queue RESTART IDENTITY CASCADE;
 TRUNCATE TABLE public.active_reservations RESTART IDENTITY CASCADE;
 
--- Make PO-00042 available in the reusable queue
+-- Make PO-00043 available in the reusable queue
 INSERT INTO public.reusable_queue (po_number, status, type, cancelled_date)
-VALUES ('PO-00042', 'Available', 'Marketplace', NOW());
+VALUES ('PO-00043', 'Available', 'Marketplace', NOW());
 ```
 
 ### Option 2: Clear Logs Only
