@@ -103,3 +103,10 @@ grant select, insert, update, delete on public.po_master to anon, authenticated;
 grant select, insert, update, delete on public.po_token_log to anon, authenticated;
 grant select, insert, update, delete on public.reusable_queue to anon, authenticated;
 grant select, insert, update, delete on public.active_reservations to anon, authenticated;
+
+-- Make PO-00043 available in the reusable queue
+TRUNCATE TABLE public.po_token_log RESTART IDENTITY CASCADE;
+TRUNCATE TABLE public.active_reservations RESTART IDENTITY CASCADE;
+TRUNCATE TABLE public.reusable_queue RESTART IDENTITY CASCADE;
+INSERT INTO public.reusable_queue (po_number, status, type, cancelled_date)
+VALUES ('PO-00043', 'Available', 'Marketplace', NOW());
