@@ -117,6 +117,148 @@ const VENDOR_COLUMNS = [
   { key: "lastOrderDate", label: "Last Order" },
 ];
 
+const PROCUREMENT_REPORT_COLUMNS = [
+  { key: "itemName", label: "Item Name", type: "text", width: 42 },
+  { key: "amount", label: "Amount", type: "money", width: 14 },
+  { key: "qty", label: "Qty", type: "number", width: 10 },
+  { key: "category", label: "Category", type: "text", width: 20 },
+  { key: "sourceOfSupply", label: "Source Of Supply", type: "text", width: 16 },
+  { key: "vendorName", label: "Vendor Name", type: "text", width: 28 },
+  { key: "poNumber", label: "PO Number", type: "text", width: 14 },
+  { key: "freightCost", label: "Freight Cost", type: "money", width: 14 },
+  { key: "billNo", label: "Bill No", type: "text", width: 14 },
+  { key: "uom", label: "UOM", type: "text", width: 10 },
+  { key: "qtyInt", label: "Qty Int", type: "number", width: 10 },
+  { key: "poDate", label: "PO Date", type: "date", width: 14 },
+  { key: "deliveryDate", label: "Delivery Date", type: "date", width: 14 },
+  { key: "materialType", label: "Material Type", type: "text", width: 18 },
+  { key: "unitRate", label: "Unit Rate", type: "money", width: 14 },
+  { key: "taxPercent", label: "Tax %", type: "percent", width: 10 },
+  { key: "taxAmount", label: "Tax Amount", type: "money", width: 14 },
+  { key: "lineTotal", label: "Line Total", type: "money", width: 14 },
+  { key: "poTotal", label: "PO Total", type: "money", width: 14 },
+  { key: "amountPaid", label: "Amount Paid", type: "money", width: 14 },
+  { key: "balanceDue", label: "Balance Due", type: "money", width: 14 },
+  { key: "paymentStatus", label: "Payment Status", type: "text", width: 18 },
+  { key: "poStatus", label: "PO Status", type: "text", width: 16 },
+  { key: "deliveryStatus", label: "Delivery Status", type: "text", width: 18 },
+];
+
+const MECHANICAL_ANALYSIS_TABS = [
+  "Dashboard",
+  "Cleaned Lines",
+  "Vendor Summary",
+  "Material Analysis",
+  "Custom vs OTS",
+  "Lead Time",
+  "Tax Freight",
+  "Opportunities",
+  "Cleaning Notes",
+];
+
+const MECHANICAL_ANALYSIS_COLUMNS = {
+  Dashboard: [
+    { key: "section", label: "Section", type: "text", width: 24 },
+    { key: "item", label: "Item", type: "text", width: 44 },
+    { key: "value", label: "Value", type: "text", width: 20 },
+    { key: "comment", label: "Comment", type: "text", width: 58 },
+  ],
+  "Cleaned Lines": [
+    { key: "bomLine", label: "BOM Line", type: "number", width: 10 },
+    { key: "poNumber", label: "PO Number", type: "text", width: 14 },
+    { key: "itemDescription", label: "Item Description", type: "text", width: 52 },
+    { key: "vendor", label: "Vendor", type: "text", width: 28 },
+    { key: "source", label: "Source", type: "text", width: 12 },
+    { key: "materialType", label: "Material Type", type: "text", width: 24 },
+    { key: "classification", label: "Classification", type: "text", width: 18 },
+    { key: "qtyPerBom", label: "Qty per BOM", type: "number", width: 12 },
+    { key: "poQty", label: "PO Qty", type: "number", width: 12 },
+    { key: "unitPrice", label: "Unit Price", type: "money", width: 14 },
+    { key: "lineTotalBeforeTax", label: "Line Total Before Tax", type: "money", width: 18 },
+    { key: "taxAmount", label: "Tax Amount", type: "money", width: 14 },
+    { key: "lineTotal", label: "Line Total", type: "money", width: 14 },
+    { key: "allocatedFreight", label: "Allocated Freight", type: "money", width: 16 },
+    { key: "landedCost", label: "Landed Cost", type: "money", width: 14 },
+    { key: "poDate", label: "PO Date", type: "date", width: 14 },
+    { key: "deliveryDate", label: "Delivery Date", type: "date", width: 14 },
+    { key: "leadTimeDays", label: "Lead Time Days", type: "number", width: 14 },
+    { key: "mechanicalSpendPercent", label: "Mechanical Spend %", type: "percent", width: 18 },
+    { key: "totalBomPercent", label: "Total BOM %", type: "percent", width: 14 },
+    { key: "paymentStatus", label: "Payment Status", type: "text", width: 18 },
+    { key: "poStatus", label: "PO Status", type: "text", width: 16 },
+    { key: "deliveryStatus", label: "Delivery Status", type: "text", width: 18 },
+    { key: "sourcingComment", label: "Sourcing Comment", type: "text", width: 52 },
+  ],
+  "Vendor Summary": [
+    { key: "vendor", label: "Vendor", type: "text", width: 28 },
+    { key: "totalSpend", label: "Total Spend", type: "money", width: 16 },
+    { key: "spendPercent", label: "Spend %", type: "percent", width: 12 },
+    { key: "lineCount", label: "Line Count", type: "number", width: 12 },
+    { key: "avgUnitPrice", label: "Avg Unit Price", type: "money", width: 16 },
+    { key: "totalTax", label: "Total Tax", type: "money", width: 14 },
+    { key: "allocatedFreight", label: "Allocated Freight", type: "money", width: 16 },
+    { key: "avgLeadTime", label: "Avg Lead Time", type: "number", width: 14 },
+    { key: "paymentStatus", label: "Payment Status", type: "text", width: 18 },
+    { key: "materialTypes", label: "Material Types", type: "text", width: 34 },
+    { key: "customSplit", label: "Custom Split", type: "text", width: 28 },
+    { key: "riskLevel", label: "Risk Level", type: "text", width: 14 },
+    { key: "recommendedAction", label: "Recommended Action", type: "text", width: 46 },
+  ],
+  "Material Analysis": [
+    { key: "materialType", label: "Material Type", type: "text", width: 24 },
+    { key: "totalSpend", label: "Total Spend", type: "money", width: 16 },
+    { key: "spendPercent", label: "Spend %", type: "percent", width: 12 },
+    { key: "lineCount", label: "Line Count", type: "number", width: 12 },
+    { key: "avgUnitPrice", label: "Avg Unit Price", type: "money", width: 16 },
+    { key: "avgLeadTime", label: "Avg Lead Time", type: "number", width: 14 },
+    { key: "customSpend", label: "Custom Spend", type: "money", width: 16 },
+    { key: "offTheShelfSpend", label: "Off-the-shelf Spend", type: "money", width: 20 },
+    { key: "needsReviewSpend", label: "Needs Review Spend", type: "money", width: 20 },
+  ],
+  "Custom vs OTS": [
+    { key: "category", label: "Category", type: "text", width: 18 },
+    { key: "totalSpend", label: "Total Spend", type: "money", width: 16 },
+    { key: "spendPercent", label: "Spend %", type: "percent", width: 12 },
+    { key: "lineCount", label: "Line Count", type: "number", width: 12 },
+    { key: "avgUnitPrice", label: "Avg Unit Price", type: "money", width: 16 },
+    { key: "avgLeadTime", label: "Avg Lead Time", type: "number", width: 14 },
+    { key: "vendorCount", label: "Vendor Count", type: "number", width: 14 },
+    { key: "recommendation", label: "Recommendation", type: "text", width: 52 },
+  ],
+  "Lead Time": [
+    { key: "vendor", label: "Vendor", type: "text", width: 28 },
+    { key: "avgLeadTime", label: "Avg Lead Time", type: "number", width: 14 },
+    { key: "minLeadTime", label: "Min Lead Time", type: "number", width: 14 },
+    { key: "maxLeadTime", label: "Max Lead Time", type: "number", width: 14 },
+    { key: "lineCount", label: "Line Count", type: "number", width: 12 },
+    { key: "totalSpend", label: "Total Spend", type: "money", width: 16 },
+    { key: "riskComment", label: "Risk Comment", type: "text", width: 44 },
+  ],
+  "Tax Freight": [
+    { key: "vendor", label: "Vendor", type: "text", width: 28 },
+    { key: "totalTax", label: "Total Tax", type: "money", width: 16 },
+    { key: "taxPercentOfBase", label: "Tax % of Base", type: "percent", width: 16 },
+    { key: "allocatedFreight", label: "Allocated Freight", type: "money", width: 16 },
+    { key: "freightPercentOfLanded", label: "Freight % of Landed", type: "percent", width: 18 },
+    { key: "lineCount", label: "Line Count", type: "number", width: 12 },
+  ],
+  Opportunities: [
+    { key: "rank", label: "Rank", type: "number", width: 8 },
+    { key: "itemDescription", label: "Item Description", type: "text", width: 56 },
+    { key: "vendor", label: "Vendor", type: "text", width: 28 },
+    { key: "classification", label: "Classification", type: "text", width: 18 },
+    { key: "materialType", label: "Material Type", type: "text", width: 24 },
+    { key: "landedCost", label: "Landed Cost", type: "money", width: 16 },
+    { key: "leadTime", label: "Lead Time", type: "number", width: 12 },
+    { key: "opportunity", label: "Opportunity", type: "text", width: 30 },
+    { key: "recommendedAction", label: "Recommended Action", type: "text", width: 58 },
+  ],
+  "Cleaning Notes": [
+    { key: "area", label: "Area", type: "text", width: 28 },
+    { key: "method", label: "Method / Assumption", type: "text", width: 86 },
+  ],
+};
+
 const METRIC_PRODUCT_COLUMNS = [
   { key: "productName", label: "Product" },
   { key: "vendorCount", label: "Vendors" },
@@ -267,6 +409,9 @@ const state = {
   selectedMetricProduct: null,
   editingPoKey: null,
   showMetricVendorForm: false,
+  showProcurementReport: false,
+  showMechanicalAnalysis: false,
+  mechanicalAnalysisTab: "Dashboard",
   filters: {
     poSearch: "",
     poVendor: "all",
@@ -1416,6 +1561,34 @@ async function syncStateToSupabase() {
   } finally {
     remoteSyncInFlight = false;
   }
+}
+
+async function deletePoFromSupabase(poNumber) {
+  if (!useSupabase || !poNumber) return;
+  const optionalDeletes = [
+    ["po_followup_logs", "po_number"],
+    ["vendor_email_queue", "po_number"],
+    ["po_activity_events", "po_number"],
+    ["po_followups", "po_number"],
+  ];
+  for (const [table, column] of optionalDeletes) {
+    const { error } = await supabaseClient
+      .from(table)
+      .delete()
+      .eq(column, poNumber);
+    if (error && !isOptionalSupabaseTableError(error))
+      console.warn(`PO cleanup skipped for ${table}`, error);
+  }
+  const lineDelete = await supabaseClient
+    .from("po_lines")
+    .delete()
+    .eq("po_number", poNumber);
+  if (lineDelete.error) throw lineDelete.error;
+  const poDelete = await supabaseClient
+    .from("purchase_orders")
+    .delete()
+    .eq("po_number", poNumber);
+  if (poDelete.error) throw poDelete.error;
 }
 
 function scheduleRemoteSync() {
@@ -6684,27 +6857,62 @@ function applyPoChanges(existingPo, payload) {
   renderAll();
 }
 
-function deletePurchaseOrder(poKey) {
+async function deletePurchaseOrder(poKey) {
   const { po } = getDerivedAndGroupedPo(poKey);
   if (!po) return;
+  const poNumber = cleanText(po.poNumber);
   const ok = window.confirm(
     `Delete ${po.poNumber}? This will remove the full PO from the site.`,
   );
   if (!ok) return;
 
-  po.items.forEach((item) => {
-    if (item.manual) {
-      state.manualRows = state.manualRows.filter((row) => row.id !== item.id);
-    } else {
-      state.rowOverrides[item.id] = {
-        ...(state.rowOverrides[item.id] || {}),
-        __deleted: true,
-      };
-    }
+  const deleteLineIds = new Set(
+    (po.items || []).map((item) => cleanText(item.id)).filter(Boolean),
+  );
+  allRows()
+    .filter(
+      (row) =>
+        cleanText(row.poNumber) === poNumber ||
+        deleteLineIds.has(cleanText(row.id)),
+    )
+    .forEach((row) => {
+      deleteLineIds.add(cleanText(row.id));
+    });
+
+  state.manualRows = (state.manualRows || []).filter(
+    (row) =>
+      cleanText(row.poNumber) !== poNumber &&
+      !deleteLineIds.has(cleanText(row.id)),
+  );
+  baseRows.forEach((row) => {
+    if (
+      cleanText(row.poNumber) !== poNumber &&
+      !deleteLineIds.has(cleanText(row.id))
+    )
+      return;
+    state.rowOverrides[row.id] = {
+      ...(state.rowOverrides[row.id] || {}),
+      __deleted: true,
+    };
   });
 
   saveState();
   renderAll();
+  if (!useSupabase) return;
+
+  clearTimeout(remoteSyncTimer);
+  try {
+    await deletePoFromSupabase(poNumber);
+    await loadRemoteStateFromSupabase();
+    saveState();
+    clearTimeout(remoteSyncTimer);
+    renderAll();
+  } catch (error) {
+    console.error("Delete PO failed", error);
+    alert(`Delete failed: ${error.message || error}`);
+    await loadRemoteStateFromSupabase().catch(() => false);
+    renderAll();
+  }
 }
 
 function openProductDetailModal(poKey) {
@@ -6908,6 +7116,1896 @@ function exportFullData() {
   const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   link.href = URL.createObjectURL(blob);
   link.download = `stack-n-stock-full-data-${timestamp}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function buildProcurementReportRows(derived = buildDerived()) {
+  const poByNumber = new Map(
+    (derived.pos || []).map((po) => [cleanText(po.poNumber), po]),
+  );
+
+  return allRows()
+    .slice()
+    .sort((a, b) => {
+      const poCompare = comparePoNumbers(a.poNumber, b.poNumber);
+      if (poCompare !== 0) return poCompare;
+      return cleanText(a.itemDesc).localeCompare(cleanText(b.itemDesc), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    })
+    .map((row) => {
+      const po = poByNumber.get(cleanText(row.poNumber)) || {};
+      const lineType = inferLineType(row.itemDesc, row.lineType);
+      const isCharge = lineType === "charge";
+      const itemName = cleanText(row.itemDesc) || "Unnamed Item";
+      const qty = number(row.quantityOrdered);
+      const itemTotal = roundMoney(number(row.itemTotal) || qty * number(row.itemPrice));
+      const taxAmount = roundMoney(number(row.itemTaxAmount));
+      const lineTotal = roundMoney(number(row.lineGrandTotal) || itemTotal + taxAmount);
+      const category = isCharge
+        ? cleanText(row.materialType) || "Freight Cost"
+        : cleanText(row.materialType) || "Procurement Item";
+      return {
+        itemName,
+        amount: itemTotal || lineTotal,
+        qty,
+        category,
+        sourceOfSupply: cleanText(row.source || po.source),
+        vendorName: cleanText(row.vendorName || po.vendorName),
+        poNumber: cleanText(row.poNumber || po.poNumber),
+        freightCost: isCharge ? lineTotal : "",
+        billNo: cleanText(row.billNo || row.billNumber || row.invoiceNo || ""),
+        uom: normalizeUom(row.uom || "Nos"),
+        qtyInt: Number.isFinite(qty) ? Math.trunc(qty) : "",
+        poDate: cleanText(row.poDate || po.poDate),
+        deliveryDate: cleanText(row.deliveryDate || po.deliveryDate),
+        materialType: cleanText(row.materialType || po.materialType),
+        unitRate: number(row.itemPrice),
+        taxPercent: number(row.itemTaxPercent),
+        taxAmount,
+        lineTotal,
+        poTotal: roundMoney(number(po.poTotal) || lineTotal),
+        amountPaid: roundMoney(number(po.amountPaid)),
+        balanceDue: roundMoney(number(po.balanceDue)),
+        paymentStatus: normalizePaymentStatus(row.paymentStatus || po.paymentStatus),
+        poStatus: normalizePoStatus(row.poStatus || po.poStatus),
+        deliveryStatus: displayDeliveryStatus({
+          deliveryStatus: row.deliveryStatus || po.deliveryStatus,
+          deliveryDate: row.deliveryDate || po.deliveryDate,
+          edd: row.edd || po.edd,
+        }),
+      };
+    });
+}
+
+function reportDisplayValue(value, type) {
+  if (value === null || value === undefined || value === "") return "";
+  if (type === "money") return money(value);
+  if (type === "number") return formatNumber(value);
+  if (type === "percent") return `${formatNumber(value)}%`;
+  if (type === "date") return formatDate(value);
+  return cleanText(value);
+}
+
+function mechanicalPercent(part, whole) {
+  const denominator = number(whole);
+  if (!denominator) return 0;
+  return roundMoney((number(part) / denominator) * 100);
+}
+
+function mechanicalAverage(values) {
+  const numeric = values
+    .map((value) => number(value))
+    .filter((value) => Number.isFinite(value) && value !== 0);
+  if (!numeric.length) return 0;
+  return roundMoney(numeric.reduce((sum, value) => sum + value, 0) / numeric.length);
+}
+
+function leadTimeDays(poDate, deliveryDate) {
+  const start = parseDateOnly(poDate);
+  const end = parseDateOnly(deliveryDate);
+  if (!start || !end) return "";
+  return Math.max(0, Math.round((end - start) / 86400000));
+}
+
+function isMechanicalProcurementLine(row) {
+  const text = normalizeKey(
+    [
+      row.itemDesc,
+      row.materialType,
+      row.hsnSac,
+      row.terms,
+      row.vendorName,
+    ].join(" "),
+  );
+  if (!text || inferLineType(row.itemDesc, row.lineType) === "charge") return false;
+  const customHint =
+    /\b(MTO|CUSTOM|DRAWING|FABRICAT|WELD|MACHIN|ASSEMBLY|WINCH|GEARBOX|SHAFT|FRAME|BRACKET)\b/.test(
+      text,
+    ) || text.includes("AS PER DRAWING");
+  const generalConsumable =
+    /\b(NUT|BOLT|WASHER|SCREW|FASTENER|ADHESIVE|TAPE|GLUE|OIL|GREASE|PACKING|PAINT)\b/.test(
+      text,
+    );
+  const mechanicalHint =
+    /\b(WHEEL|BEARING|ROD|PLATE|PULLEY|BELT|WINCH|PIPE|JOINT|COLLAR|RING|ROLLER|MACHIN|FABRICAT|FRAME|BRACKET|HOUSING|ASSEMBLY|GEARBOX|SHAFT|COUPLING|CLAMP|GUIDE|RAIL|CHANNEL|BEAM|CASTING|BUSH|SPACER|LINEAR|TIMING|SPRING|MOTOR|LOCKING|SPROCKET|GEAR)\b/.test(
+      text,
+    );
+  if (generalConsumable && !customHint) return false;
+  return mechanicalHint || customHint;
+}
+
+function classifyMechanicalMaterial(row) {
+  const text = normalizeKey(row.itemDesc);
+  if (/\b(CASTING|CAST)\b/.test(text)) return "Casting";
+  if (/\b(ASSEMBLY|GEARBOX|WINCH|LIFT|MODULE|UNIT)\b/.test(text))
+    return "Assembly";
+  if (/\b(SHEET|PLATE|BRACKET|FRAME|CHANNEL|BEAM|PANEL|WELDMENT|FABRICAT|BENDING|LASER)\b/.test(text))
+    return "Sheet metal part";
+  if (/\b(BEARING|LINEAR|GUIDE|RAIL|BUSH)\b/.test(text))
+    return "Standard mechanical component";
+  if (/\b(BELT|LOCKING DEVICE|COUPLING|CHAIN|SPROCKET)\b/.test(text))
+    return "Bought-out mechanical item";
+  if (/\b(MACHIN|WHEEL|ROD|SHAFT|ROLLER|COLLAR|RING|SPACER|CLAMP|PULLEY|GEAR|PIPE|JOINT)\b/.test(text))
+    return "Machined part";
+  return "Other / Needs Review";
+}
+
+function classifyMechanicalSourcing(row, po = {}) {
+  const text = normalizeKey(
+    [row.itemDesc, row.materialType, po.materialType, row.vendorName].join(" "),
+  );
+  if (text.includes("MTO")) return "Custom-made";
+  if (text.includes("RTO")) return "Off-the-shelf";
+  if (
+    text.includes("AS PER DRAWING") ||
+    /\b(CUSTOM|DRAWING|FABRICAT|WELDMENT|MACHINED|MACHINING|WINCH|GEARBOX|ASSEMBLY)\b/.test(text)
+  )
+    return "Custom-made";
+  if (
+    /\b(MISUMI|IGUS|SKF|BEARING|BELT|LOCKING DEVICE|STANDARD|CATALOG|COUPLING|CHAIN|SPROCKET)\b/.test(
+      text,
+    )
+  )
+    return "Off-the-shelf";
+  return "Needs Review";
+}
+
+function mechanicalSourcingComment(row) {
+  if (row.classification === "Custom-made")
+    return "Review drawing tolerance, batch quantities, and alternate suppliers; evaluate standard equivalent.";
+  if (row.classification === "Off-the-shelf")
+    return "Consolidate demand and negotiate catalog pricing.";
+  return "Clarify MTO/RTO status, add benchmark quote, and confirm backup vendor.";
+}
+
+function mechanicalRiskLevel(spendPercent, avgLeadTime, needsReviewCount, customCount) {
+  if (spendPercent >= 20 || avgLeadTime >= 30 || customCount >= 5) return "High";
+  if (spendPercent >= 8 || avgLeadTime >= 15 || needsReviewCount > 0) return "Medium";
+  return "Low";
+}
+
+function mechanicalVendorAction(riskLevel, avgLeadTime, needsReviewCount, customCount) {
+  if (riskLevel === "High" && avgLeadTime >= 30)
+    return "Qualify alternate/local source and review lead-time reduction plan.";
+  if (riskLevel === "High" || customCount >= 5)
+    return "Run DFM/cost-reduction review and benchmark alternate suppliers.";
+  if (needsReviewCount > 0)
+    return "Complete MTO/RTO classification and benchmark price evidence.";
+  return "Monitor pricing and consolidate future orders where practical.";
+}
+
+function mechanicalCategoryRecommendation(category) {
+  if (category === "Custom-made")
+    return "Standardize or convert high-spend custom items to catalog alternatives where possible.";
+  if (category === "Off-the-shelf")
+    return "Consolidate and negotiate catalog pricing.";
+  return "Review item descriptions and map to MTO/RTO.";
+}
+
+function mechanicalOpportunityForLine(row) {
+  if (row.classification === "Custom-made")
+    return {
+      opportunity: "Custom cost reduction / DFM review",
+      action:
+        "Review drawing tolerance, batch quantities, and alternate suppliers; evaluate standard equivalent.",
+    };
+  if (number(row.leadTimeDays) >= 30)
+    return {
+      opportunity: "Lead-time reduction",
+      action: "Set min stock / blanket PO or find local alternate.",
+    };
+  if (row.classification === "Needs Review")
+    return {
+      opportunity: "Classification and price review",
+      action: "Clarify MTO/RTO status and benchmark vendor quote.",
+    };
+  return {
+    opportunity: "Catalog price negotiation",
+    action: "Consolidate recurring demand and negotiate price break.",
+  };
+}
+
+function buildMechanicalAnalysis(derived = buildDerived()) {
+  const sourceRows = allRows();
+  const pos = derived.pos || [];
+  const poByNumber = new Map(pos.map((po) => [cleanText(po.poNumber), po]));
+  const productRows = sourceRows.filter(
+    (row) => inferLineType(row.itemDesc, row.lineType) !== "charge",
+  );
+  const chargeRows = sourceRows.filter(
+    (row) => inferLineType(row.itemDesc, row.lineType) === "charge",
+  );
+  const totalBomValue = roundMoney(
+    productRows.reduce(
+      (sum, row) =>
+        sum + (number(row.itemTotal) || number(row.itemPrice) * number(row.quantityOrdered)),
+      0,
+    ),
+  );
+  const chargeByPo = new Map();
+  chargeRows.forEach((row) => {
+    const poNumber = cleanText(row.poNumber);
+    const chargeValue = number(row.lineGrandTotal) || lineGrandTotal(row);
+    chargeByPo.set(poNumber, roundMoney((chargeByPo.get(poNumber) || 0) + chargeValue));
+  });
+  const rawMechanicalRows = productRows.filter(isMechanicalProcurementLine);
+  const mechanicalBaseByPo = new Map();
+  rawMechanicalRows.forEach((row) => {
+    const poNumber = cleanText(row.poNumber);
+    const base = number(row.itemTotal) || number(row.itemPrice) * number(row.quantityOrdered);
+    mechanicalBaseByPo.set(poNumber, roundMoney((mechanicalBaseByPo.get(poNumber) || 0) + base));
+  });
+  const cleanedLines = rawMechanicalRows
+    .map((row, index) => {
+      const po = poByNumber.get(cleanText(row.poNumber)) || {};
+      const qty = number(row.quantityOrdered);
+      const unitPrice = number(row.itemPrice);
+      const lineTotalBeforeTax = roundMoney(number(row.itemTotal) || qty * unitPrice);
+      const taxAmount = roundMoney(number(row.itemTaxAmount) || lineTotalBeforeTax * (number(row.itemTaxPercent) / 100));
+      const lineTotal = roundMoney(number(row.lineGrandTotal) || lineTotalBeforeTax + taxAmount);
+      const poMechanicalBase = mechanicalBaseByPo.get(cleanText(row.poNumber)) || 0;
+      const allocatedFreight = poMechanicalBase
+        ? roundMoney((chargeByPo.get(cleanText(row.poNumber)) || 0) * (lineTotalBeforeTax / poMechanicalBase))
+        : 0;
+      const landedCost = roundMoney(lineTotal + allocatedFreight);
+      const deliveryDate = cleanText(row.deliveryDate || po.deliveryDate);
+      const poDate = cleanText(row.poDate || po.poDate);
+      const materialType = classifyMechanicalMaterial(row);
+      const classification = classifyMechanicalSourcing(row, po);
+      const deliveryStatus = displayDeliveryStatus({
+        deliveryStatus: row.deliveryStatus || po.deliveryStatus,
+        deliveryDate,
+        edd: row.edd || po.edd,
+      });
+      return {
+        bomLine: index + 1,
+        poNumber: cleanText(row.poNumber || po.poNumber),
+        itemDescription: cleanText(row.itemDesc) || "Unnamed mechanical item",
+        vendor: cleanText(row.vendorName || po.vendorName) || "Unknown Vendor",
+        source: cleanText(row.source || po.source),
+        materialType,
+        classification,
+        qtyPerBom: qty,
+        poQty: qty,
+        unitPrice,
+        lineTotalBeforeTax,
+        taxAmount,
+        lineTotal,
+        allocatedFreight,
+        landedCost,
+        poDate,
+        deliveryDate,
+        leadTimeDays: leadTimeDays(poDate, deliveryDate),
+        mechanicalSpendPercent: 0,
+        totalBomPercent: 0,
+        paymentStatus: normalizePaymentStatus(row.paymentStatus || po.paymentStatus),
+        poStatus: normalizePoStatus(row.poStatus || po.poStatus),
+        deliveryStatus,
+        sourcingComment: "",
+      };
+    })
+    .sort((a, b) => b.landedCost - a.landedCost);
+
+  const mechanicalLineTotal = roundMoney(
+    cleanedLines.reduce((sum, row) => sum + number(row.lineTotalBeforeTax), 0),
+  );
+  const mechanicalTax = roundMoney(
+    cleanedLines.reduce((sum, row) => sum + number(row.taxAmount), 0),
+  );
+  const allocatedFreight = roundMoney(
+    cleanedLines.reduce((sum, row) => sum + number(row.allocatedFreight), 0),
+  );
+  const mechanicalLanded = roundMoney(
+    cleanedLines.reduce((sum, row) => sum + number(row.landedCost), 0),
+  );
+  cleanedLines.forEach((row, index) => {
+    row.bomLine = index + 1;
+    row.mechanicalSpendPercent = mechanicalPercent(row.landedCost, mechanicalLanded);
+    row.totalBomPercent = mechanicalPercent(row.landedCost, totalBomValue);
+    row.sourcingComment = mechanicalSourcingComment(row);
+  });
+
+  const groupRows = (rows, keyFn) => {
+    const groups = new Map();
+    rows.forEach((row) => {
+      const key = keyFn(row) || "Unknown";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    });
+    return groups;
+  };
+  const countBy = (rows, keyFn) => {
+    const counts = new Map();
+    rows.forEach((row) => {
+      const key = keyFn(row) || "Unknown";
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([key, count]) => `${key}: ${count}`)
+      .join(", ");
+  };
+  const sortedBySpend = (rows) =>
+    rows.sort((a, b) => number(b.totalSpend) - number(a.totalSpend));
+  const vendorSummary = sortedBySpend(
+    [...groupRows(cleanedLines, (row) => row.vendor)].map(([vendor, rows]) => {
+      const totalSpend = roundMoney(rows.reduce((sum, row) => sum + row.landedCost, 0));
+      const avgLeadTime = mechanicalAverage(rows.map((row) => row.leadTimeDays));
+      const needsReviewCount = rows.filter((row) => row.classification === "Needs Review").length;
+      const customCount = rows.filter((row) => row.classification === "Custom-made").length;
+      const riskLevel = mechanicalRiskLevel(
+        mechanicalPercent(totalSpend, mechanicalLanded),
+        avgLeadTime,
+        needsReviewCount,
+        customCount,
+      );
+      const paymentStatuses = new Set(rows.map((row) => row.paymentStatus).filter(Boolean));
+      return {
+        vendor,
+        totalSpend,
+        spendPercent: mechanicalPercent(totalSpend, mechanicalLanded),
+        lineCount: rows.length,
+        avgUnitPrice: mechanicalAverage(rows.map((row) => row.unitPrice)),
+        totalTax: roundMoney(rows.reduce((sum, row) => sum + row.taxAmount, 0)),
+        allocatedFreight: roundMoney(rows.reduce((sum, row) => sum + row.allocatedFreight, 0)),
+        avgLeadTime,
+        paymentStatus:
+          paymentStatuses.size === 1 ? [...paymentStatuses][0] || "Unknown" : "Mixed",
+        materialTypes: [...new Set(rows.map((row) => row.materialType))].sort().join(", "),
+        customSplit: countBy(rows, (row) => row.classification),
+        riskLevel,
+        recommendedAction: mechanicalVendorAction(
+          riskLevel,
+          avgLeadTime,
+          needsReviewCount,
+          customCount,
+        ),
+      };
+    }),
+  );
+  const materialAnalysis = sortedBySpend(
+    [...groupRows(cleanedLines, (row) => row.materialType)].map(([materialType, rows]) => ({
+      materialType,
+      totalSpend: roundMoney(rows.reduce((sum, row) => sum + row.landedCost, 0)),
+      spendPercent: mechanicalPercent(
+        rows.reduce((sum, row) => sum + row.landedCost, 0),
+        mechanicalLanded,
+      ),
+      lineCount: rows.length,
+      avgUnitPrice: mechanicalAverage(rows.map((row) => row.unitPrice)),
+      avgLeadTime: mechanicalAverage(rows.map((row) => row.leadTimeDays)),
+      customSpend: roundMoney(
+        rows
+          .filter((row) => row.classification === "Custom-made")
+          .reduce((sum, row) => sum + row.landedCost, 0),
+      ),
+      offTheShelfSpend: roundMoney(
+        rows
+          .filter((row) => row.classification === "Off-the-shelf")
+          .reduce((sum, row) => sum + row.landedCost, 0),
+      ),
+      needsReviewSpend: roundMoney(
+        rows
+          .filter((row) => row.classification === "Needs Review")
+          .reduce((sum, row) => sum + row.landedCost, 0),
+      ),
+    })),
+  );
+  const customVsOts = ["Custom-made", "Needs Review", "Off-the-shelf"].map((category) => {
+    const rows = cleanedLines.filter((row) => row.classification === category);
+    const totalSpend = roundMoney(rows.reduce((sum, row) => sum + row.landedCost, 0));
+    return {
+      category,
+      totalSpend,
+      spendPercent: mechanicalPercent(totalSpend, mechanicalLanded),
+      lineCount: rows.length,
+      avgUnitPrice: mechanicalAverage(rows.map((row) => row.unitPrice)),
+      avgLeadTime: mechanicalAverage(rows.map((row) => row.leadTimeDays)),
+      vendorCount: new Set(rows.map((row) => row.vendor)).size,
+      recommendation: mechanicalCategoryRecommendation(category),
+    };
+  });
+  const leadTime = vendorSummary
+    .map((vendor) => {
+      const rows = cleanedLines.filter((row) => row.vendor === vendor.vendor);
+      const leadValues = rows
+        .map((row) => number(row.leadTimeDays))
+        .filter((value) => value > 0);
+      return {
+        vendor: vendor.vendor,
+        avgLeadTime: vendor.avgLeadTime,
+        minLeadTime: leadValues.length ? Math.min(...leadValues) : "",
+        maxLeadTime: leadValues.length ? Math.max(...leadValues) : "",
+        lineCount: rows.length,
+        totalSpend: vendor.totalSpend,
+        riskComment:
+          vendor.avgLeadTime >= 30
+            ? "Delay risk: qualify alternate/source locally"
+            : "Normal lead time; monitor only",
+      };
+    })
+    .sort((a, b) => number(b.avgLeadTime) - number(a.avgLeadTime));
+  const taxFreight = vendorSummary.map((vendor) => {
+    const rows = cleanedLines.filter((row) => row.vendor === vendor.vendor);
+    const base = rows.reduce((sum, row) => sum + row.lineTotalBeforeTax, 0);
+    return {
+      vendor: vendor.vendor,
+      totalTax: vendor.totalTax,
+      taxPercentOfBase: mechanicalPercent(vendor.totalTax, base),
+      allocatedFreight: vendor.allocatedFreight,
+      freightPercentOfLanded: mechanicalPercent(vendor.allocatedFreight, vendor.totalSpend),
+      lineCount: vendor.lineCount,
+    };
+  });
+  const opportunities = cleanedLines
+    .map((row) => {
+      const opp = mechanicalOpportunityForLine(row);
+      const score =
+        row.landedCost +
+        (row.classification === "Custom-made" ? 30000 : 0) +
+        (row.classification === "Needs Review" ? 15000 : 0) +
+        (number(row.leadTimeDays) >= 30 ? 20000 : 0);
+      return {
+        ...opp,
+        score,
+        itemDescription: row.itemDescription,
+        vendor: row.vendor,
+        classification: row.classification,
+        materialType: row.materialType,
+        landedCost: row.landedCost,
+        leadTime: row.leadTimeDays,
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10)
+    .map((row, index) => ({ rank: index + 1, ...row }));
+  const avgLeadTime = mechanicalAverage(cleanedLines.map((row) => row.leadTimeDays));
+  const benchmarkStatus =
+    mechanicalPercent(mechanicalLanded, totalBomValue) > 3
+      ? "above benchmark; main action is cost reduction on custom/mechanical assemblies rather than consumables."
+      : "within benchmark; continue monitoring mechanical sourcing and lead time.";
+  const dashboardRows = [
+    { section: "Metric", item: "Total BOM Value (ex-freight)", value: money(totalBomValue), comment: "All non-charge PO line base value." },
+    { section: "Metric", item: "Mechanical Spend (line total)", value: money(mechanicalLineTotal), comment: "Mechanical base line value before tax/freight." },
+    { section: "Metric", item: "Mechanical Spend (landed)", value: money(mechanicalLanded), comment: "Mechanical line total plus tax and allocated freight." },
+    { section: "Metric", item: "Mechanical Spend % of BOM", value: `${formatNumber(mechanicalPercent(mechanicalLanded, totalBomValue))}%`, comment: `Benchmark is 2% to 3%; current result is ${benchmarkStatus}` },
+    { section: "Metric", item: "Mechanical Tax", value: money(mechanicalTax), comment: "Tax recorded on mechanical lines." },
+    { section: "Metric", item: "Allocated Freight", value: money(allocatedFreight), comment: "PO freight allocated to mechanical lines by base value." },
+    { section: "Metric", item: "Avg Lead Time (days)", value: formatNumber(avgLeadTime), comment: "Delivery date minus PO date where available." },
+    { section: "Metric", item: "Mechanical Lines", value: formatNumber(cleanedLines.length), comment: "Mechanical lines detected from current PO data." },
+    ...vendorSummary.slice(0, 10).map((row) => ({ section: "Vendor Spend", item: row.vendor, value: money(row.totalSpend), comment: row.recommendedAction })),
+    ...materialAnalysis.map((row) => ({ section: "Material Spend", item: row.materialType, value: money(row.totalSpend), comment: `${formatNumber(row.spendPercent)}% of mechanical landed spend.` })),
+    ...customVsOts.map((row) => ({ section: "Custom vs OTS", item: row.category, value: money(row.totalSpend), comment: row.recommendation })),
+    ...leadTime.slice(0, 10).map((row) => ({ section: "Lead Time Focus", item: row.vendor, value: `${formatNumber(row.avgLeadTime)} days`, comment: row.riskComment })),
+  ];
+  const cleaningNotes = [
+    { area: "Mechanical inclusion", method: "Included wheels, bearings, rods, plates, pulleys, belts, winches, pipes, joints, collars, rings, rollers, machined/fabricated parts, frames, brackets, housings, assemblies and similar mechanical BOM items." },
+    { area: "Consumable exclusion", method: "Excluded nuts, bolts, washers, screws, fasteners, adhesives, tapes, packing and low-value general hardware unless clearly custom-engineered." },
+    { area: "Freight allocation", method: "PO-level freight lines are allocated only to mechanical lines in the same PO, in proportion to base line value before tax." },
+    { area: "Custom classification", method: "MTO/custom/drawing/fabricated/machined/assembly cues are treated as Custom-made; RTO/catalog/vendor-standard cues are treated as Off-the-shelf; unclear rows are Needs Review." },
+    { area: "Lead time", method: "Lead Time Days = Delivery Date - PO Date. Missing or unclear dates are not invented." },
+    { area: "Payment mode limitation", method: "Payment mode is not provided in the current PO data. Payment Status is used only as a proxy and should not be confused with payment mode." },
+    { area: "Benchmark", method: "Management benchmark used: mechanical sourcing spend expected at 2% to 3% of total BOM value." },
+  ];
+  return {
+    summary: {
+      totalBomValue,
+      mechanicalLineTotal,
+      mechanicalLanded,
+      mechanicalSpendPercent: mechanicalPercent(mechanicalLanded, totalBomValue),
+      mechanicalTax,
+      allocatedFreight,
+      avgLeadTime,
+      lineCount: cleanedLines.length,
+      benchmarkStatus,
+    },
+    dashboardCards: [
+      { label: "Mechanical Landed", value: compactMoney(mechanicalLanded), note: `${formatNumber(cleanedLines.length)} lines` },
+      { label: "Spend % of BOM", value: `${formatNumber(mechanicalPercent(mechanicalLanded, totalBomValue))}%`, note: "Benchmark 2% to 3%" },
+      { label: "Custom Spend", value: compactMoney(customVsOts.find((row) => row.category === "Custom-made")?.totalSpend || 0), note: "DFM / standardization target" },
+      { label: "Avg Lead Time", value: `${formatNumber(avgLeadTime)} d`, note: "Vendor delivery focus" },
+    ],
+    tables: {
+      Dashboard: dashboardRows,
+      "Cleaned Lines": cleanedLines,
+      "Vendor Summary": vendorSummary,
+      "Material Analysis": materialAnalysis,
+      "Custom vs OTS": customVsOts,
+      "Lead Time": leadTime,
+      "Tax Freight": taxFreight,
+      Opportunities: opportunities,
+      "Cleaning Notes": cleaningNotes,
+    },
+  };
+}
+
+function renderMechanicalAnalysisDashboard(analysis) {
+  const grid = document.getElementById("mechanicalDashboardGrid");
+  if (!grid) return;
+  grid.innerHTML = analysis.dashboardCards
+    .map(
+      (card) => `
+        <article class="mechanical-summary-card">
+          <span>${escapeHtml(card.label)}</span>
+          <strong>${escapeHtml(card.value)}</strong>
+          <small>${escapeHtml(card.note)}</small>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderMechanicalAnalysisTabs(activeTab) {
+  const tabs = document.getElementById("mechanicalAnalysisTabs");
+  if (!tabs) return;
+  tabs.innerHTML = MECHANICAL_ANALYSIS_TABS.map(
+    (tab) => `
+      <button class="report-tab ${tab === activeTab ? "active" : ""}" type="button" data-mechanical-tab="${escapeHtml(tab)}">
+        ${escapeHtml(tab)}
+      </button>
+    `,
+  ).join("");
+}
+
+function renderMechanicalAnalysisTable(analysis) {
+  const activeTab = MECHANICAL_ANALYSIS_TABS.includes(state.mechanicalAnalysisTab)
+    ? state.mechanicalAnalysisTab
+    : "Dashboard";
+  const columns = MECHANICAL_ANALYSIS_COLUMNS[activeTab] || [];
+  const rows = analysis.tables[activeTab] || [];
+  const head = document.getElementById("mechanicalAnalysisHead");
+  const body = document.getElementById("mechanicalAnalysisBody");
+  const table = document.querySelector(".mechanical-report-table");
+  if (table) {
+    const minWidth = columns.reduce(
+      (sum, column) => sum + (column.width || 16) * 10,
+      0,
+    );
+    table.style.minWidth = `${Math.max(980, minWidth)}px`;
+  }
+  if (head) {
+    head.innerHTML = `
+      <tr>${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr>
+    `;
+  }
+  if (body) {
+    body.innerHTML = rows.length
+      ? rows
+          .map(
+            (row) => `
+              <tr>
+                ${columns
+                  .map(
+                    (column) =>
+                      `<td>${escapeHtml(reportDisplayValue(row[column.key], column.type))}</td>`,
+                  )
+                  .join("")}
+              </tr>
+            `,
+          )
+          .join("")
+      : `<tr><td colspan="${columns.length || 1}" class="empty-state">No mechanical analysis rows available.</td></tr>`;
+  }
+}
+
+function renderMechanicalAnalysis(analysis) {
+  const panel = document.getElementById("mechanicalAnalysisPanel");
+  if (!panel) return;
+  panel.classList.toggle("hidden", !state.showMechanicalAnalysis);
+  if (!state.showMechanicalAnalysis) return;
+  const summary = document.getElementById("mechanicalAnalysisSummary");
+  if (summary) {
+    summary.textContent = `${formatNumber(analysis.summary.lineCount)} mechanical lines, ${money(analysis.summary.mechanicalLanded)} landed spend, ${formatNumber(analysis.summary.mechanicalSpendPercent)}% of BOM.`;
+  }
+  renderMechanicalAnalysisDashboard(analysis);
+  renderMechanicalAnalysisTabs(state.mechanicalAnalysisTab);
+  renderMechanicalAnalysisTable(analysis);
+}
+
+function renderReports(derived = buildDerived()) {
+  const rows = buildProcurementReportRows(derived);
+  const mechanicalAnalysis = buildMechanicalAnalysis(derived);
+  const totalValue = rows.reduce((sum, row) => sum + number(row.lineTotal), 0);
+  const uniquePos = new Set(rows.map((row) => row.poNumber).filter(Boolean));
+  const reportKpiGrid = document.getElementById("reportKpiGrid");
+  if (reportKpiGrid) {
+    reportKpiGrid.innerHTML = `
+      <article class="kpi-card kpi-cyan report-kpi-card" data-report-action="open-procurement" role="button" tabindex="0">
+        <div class="kpi-icon">${kpiIconSvg("file")}</div>
+        <div class="kpi-content">
+          <div class="kpi-label"><span>Procurement Report</span></div>
+          <div class="kpi-value">${escapeHtml(formatNumber(rows.length))}</div>
+          <div class="kpi-note">${escapeHtml(formatNumber(uniquePos.size))} POs · ${escapeHtml(compactMoney(totalValue))}</div>
+        </div>
+      </article>
+      <article class="kpi-card kpi-cyan report-kpi-card" data-report-action="open-mechanical" role="button" tabindex="0">
+        <div class="kpi-icon">${kpiIconSvg("shield")}</div>
+        <div class="kpi-content">
+          <div class="kpi-label"><span>Mechanical Procurement Analysis</span></div>
+          <div class="kpi-value">${escapeHtml(compactMoney(mechanicalAnalysis.summary.mechanicalLanded))}</div>
+          <div class="kpi-note">${escapeHtml(formatNumber(mechanicalAnalysis.summary.lineCount))} lines - ${escapeHtml(formatNumber(mechanicalAnalysis.summary.mechanicalSpendPercent))}% of BOM</div>
+        </div>
+      </article>
+    `;
+  }
+
+  const panel = document.getElementById("procurementReportPanel");
+  if (panel) panel.classList.toggle("hidden", !state.showProcurementReport);
+  renderMechanicalAnalysis(mechanicalAnalysis);
+  if (!panel || !state.showProcurementReport) return;
+
+  const head = document.getElementById("procurementReportHead");
+  const body = document.getElementById("procurementReportBody");
+  const summary = document.getElementById("procurementReportSummary");
+  if (summary) {
+    summary.textContent = `${rows.length} line items across ${uniquePos.size} purchase orders. Export creates a formatted Excel workbook.`;
+  }
+  if (head) {
+    head.innerHTML = `
+      <tr>${PROCUREMENT_REPORT_COLUMNS.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr>
+    `;
+  }
+  if (body) {
+    body.innerHTML = rows.length
+      ? rows
+          .map(
+            (row) => `
+              <tr>
+                ${PROCUREMENT_REPORT_COLUMNS.map(
+                  (column) =>
+                    `<td>${escapeHtml(reportDisplayValue(row[column.key], column.type))}</td>`,
+                ).join("")}
+              </tr>
+            `,
+          )
+          .join("")
+      : `<tr><td colspan="${PROCUREMENT_REPORT_COLUMNS.length}" class="empty-state">No procurement rows available.</td></tr>`;
+  }
+}
+
+function handleReportAction(event) {
+  const card = event.target.closest("[data-report-action]");
+  if (!card) return;
+  if (card.dataset.reportAction === "open-procurement") {
+    state.showProcurementReport = true;
+    state.showMechanicalAnalysis = false;
+    renderReports(buildDerived());
+    document
+      .getElementById("procurementReportPanel")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (card.dataset.reportAction === "open-mechanical") {
+    state.showMechanicalAnalysis = true;
+    state.showProcurementReport = false;
+    renderReports(buildDerived());
+    document
+      .getElementById("mechanicalAnalysisPanel")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function xmlEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function xlsxColumnName(index) {
+  let value = index + 1;
+  let name = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    value = Math.floor((value - 1) / 26);
+  }
+  return name;
+}
+
+function addSharedString(sharedStrings, value) {
+  const text = String(value ?? "");
+  if (!sharedStrings) return null;
+  if (sharedStrings.map.has(text)) return sharedStrings.map.get(text);
+  const index = sharedStrings.items.length;
+  sharedStrings.map.set(text, index);
+  sharedStrings.items.push(text);
+  return index;
+}
+
+function buildSharedStringsXml(sharedStrings) {
+  const items = sharedStrings.items || [];
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${items.length}" uniqueCount="${items.length}">
+  ${items
+    .map(
+      (value) =>
+        `<si><t xml:space="preserve">${xmlEscape(value)}</t></si>`,
+    )
+    .join("")}
+</sst>`;
+}
+
+function xlsxCell(
+  rowIndex,
+  columnIndex,
+  value,
+  style = 0,
+  type = "text",
+  sharedStrings = null,
+  cachedValue = null,
+) {
+  const ref = `${xlsxColumnName(columnIndex)}${rowIndex}`;
+  const styleAttr = style ? ` s="${style}"` : "";
+  if (value === null || value === undefined || value === "") {
+    return `<c r="${ref}"${styleAttr}/>`;
+  }
+  if (["money", "number", "percent"].includes(type)) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return `<c r="${ref}"${styleAttr}><v>${numeric}</v></c>`;
+    }
+  }
+  if (type === "formula") {
+    const formula = String(value).startsWith("=")
+      ? String(value).slice(1)
+      : String(value);
+    if (cachedValue !== null && cachedValue !== undefined && cachedValue !== "") {
+      if (Number.isFinite(Number(cachedValue))) {
+        return `<c r="${ref}"${styleAttr}><f>${xmlEscape(formula)}</f><v>${Number(cachedValue)}</v></c>`;
+      }
+      return `<c r="${ref}"${styleAttr} t="str"><f>${xmlEscape(formula)}</f><v>${xmlEscape(cachedValue)}</v></c>`;
+    }
+    return `<c r="${ref}"${styleAttr}><f>${xmlEscape(formula)}</f></c>`;
+  }
+  if (sharedStrings) {
+    return `<c r="${ref}"${styleAttr} t="s"><v>${addSharedString(sharedStrings, value)}</v></c>`;
+  }
+  return `<c r="${ref}"${styleAttr} t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`;
+}
+
+function xlsxRow(rowIndex, cells, style = 0, sharedStrings = null) {
+  return `<row r="${rowIndex}">${cells
+    .map((cell, columnIndex) =>
+      xlsxCell(
+        rowIndex,
+        columnIndex,
+        cell.value,
+        cell.style ?? style,
+        cell.type || "text",
+        sharedStrings,
+        cell.cachedValue,
+      ),
+    )
+    .join("")}</row>`;
+}
+
+function crc32(bytes) {
+  if (!crc32.table) {
+    crc32.table = Array.from({ length: 256 }, (_, index) => {
+      let c = index;
+      for (let k = 0; k < 8; k += 1) {
+        c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      }
+      return c >>> 0;
+    });
+  }
+  let crc = 0xffffffff;
+  bytes.forEach((byte) => {
+    crc = crc32.table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  });
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function dosDateTime(date = new Date()) {
+  const year = Math.max(1980, date.getFullYear());
+  const time =
+    (date.getHours() << 11) |
+    (date.getMinutes() << 5) |
+    Math.floor(date.getSeconds() / 2);
+  const day =
+    ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+  return { time, day };
+}
+
+function uint16(value) {
+  const bytes = new Uint8Array(2);
+  new DataView(bytes.buffer).setUint16(0, value, true);
+  return bytes;
+}
+
+function uint32(value) {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, value >>> 0, true);
+  return bytes;
+}
+
+function concatBytes(parts) {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const output = new Uint8Array(total);
+  let offset = 0;
+  parts.forEach((part) => {
+    output.set(part, offset);
+    offset += part.length;
+  });
+  return output;
+}
+
+function createZipBlob(files) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  const { time, day } = dosDateTime();
+
+  files.forEach((file) => {
+    const nameBytes = encoder.encode(file.name);
+    const dataBytes =
+      file.content instanceof Uint8Array
+        ? file.content
+        : encoder.encode(file.content);
+    const crc = crc32(dataBytes);
+    const localHeader = concatBytes([
+      uint32(0x04034b50),
+      uint16(20),
+      uint16(0x0800),
+      uint16(0),
+      uint16(time),
+      uint16(day),
+      uint32(crc),
+      uint32(dataBytes.length),
+      uint32(dataBytes.length),
+      uint16(nameBytes.length),
+      uint16(0),
+      nameBytes,
+    ]);
+    localParts.push(localHeader, dataBytes);
+
+    const centralHeader = concatBytes([
+      uint32(0x02014b50),
+      uint16(20),
+      uint16(20),
+      uint16(0x0800),
+      uint16(0),
+      uint16(time),
+      uint16(day),
+      uint32(crc),
+      uint32(dataBytes.length),
+      uint32(dataBytes.length),
+      uint16(nameBytes.length),
+      uint16(0),
+      uint16(0),
+      uint16(0),
+      uint16(0),
+      uint32(0),
+      uint32(offset),
+      nameBytes,
+    ]);
+    centralParts.push(centralHeader);
+    offset += localHeader.length + dataBytes.length;
+  });
+
+  const centralDirectory = concatBytes(centralParts);
+  const endRecord = concatBytes([
+    uint32(0x06054b50),
+    uint16(0),
+    uint16(0),
+    uint16(files.length),
+    uint16(files.length),
+    uint32(centralDirectory.length),
+    uint32(offset),
+    uint16(0),
+  ]);
+  return new Blob([...localParts, centralDirectory, endRecord], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+}
+
+function buildProcurementReportWorkbook(rows) {
+  const lastColumn = xlsxColumnName(PROCUREMENT_REPORT_COLUMNS.length - 1);
+  const tableStartRow = 6;
+  const firstDataRow = tableStartRow + 1;
+  const lastRow = Math.max(firstDataRow, firstDataRow + rows.length - 1);
+  const sharedStrings = { items: [], map: new Map() };
+  const totalLineValue = rows.reduce((sum, row) => sum + number(row.lineTotal), 0);
+  const totalBalance = rows.reduce((sum, row) => sum + number(row.balanceDue), 0);
+  const uniquePos = new Set(rows.map((row) => row.poNumber).filter(Boolean));
+  const generatedOn = new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date());
+
+  const headerCells = PROCUREMENT_REPORT_COLUMNS.map((column) => ({
+    value: column.label,
+    style: 5,
+  }));
+  const dataRows = rows.map((row, rowOffset) =>
+    xlsxRow(
+      firstDataRow + rowOffset,
+      PROCUREMENT_REPORT_COLUMNS.map((column) => ({
+        value: row[column.key],
+        type: column.type,
+        style:
+          column.type === "money"
+            ? 7
+            : column.type === "number"
+              ? 8
+              : column.type === "percent"
+                ? 10
+                : 6,
+      })),
+      0,
+      sharedStrings,
+    ),
+  );
+
+  const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <dimension ref="A1:${lastColumn}${lastRow}"/>
+  <sheetViews><sheetView workbookViewId="0"><pane ySplit="6" topLeftCell="A7" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <sheetFormatPr defaultRowHeight="18"/>
+  <cols>
+    ${PROCUREMENT_REPORT_COLUMNS.map((column, index) => `<col min="${index + 1}" max="${index + 1}" width="${column.width}" customWidth="1"/>`).join("")}
+  </cols>
+  <sheetData>
+    ${xlsxRow(1, [{ value: "Procurement Report", style: 1 }, ...Array(PROCUREMENT_REPORT_COLUMNS.length - 1).fill({ value: "", style: 1 })], 0, sharedStrings)}
+    ${xlsxRow(2, [{ value: `Generated ${generatedOn}`, style: 2 }, ...Array(PROCUREMENT_REPORT_COLUMNS.length - 1).fill({ value: "", style: 2 })], 0, sharedStrings)}
+    ${xlsxRow(4, [
+      { value: "Purchase Orders", style: 3 },
+      { value: uniquePos.size, type: "number", style: 4 },
+      { value: "Line Items", style: 3 },
+      { value: rows.length, type: "number", style: 4 },
+      { value: "Line Value", style: 3 },
+      { value: totalLineValue, type: "money", style: 7 },
+      { value: "Balance Due", style: 3 },
+      { value: totalBalance, type: "money", style: 7 },
+    ], 0, sharedStrings)}
+    ${xlsxRow(tableStartRow, headerCells, 0, sharedStrings)}
+    ${dataRows.join("")}
+  </sheetData>
+  <mergeCells count="2"><mergeCell ref="A1:${lastColumn}1"/><mergeCell ref="A2:${lastColumn}2"/></mergeCells>
+  <autoFilter ref="A${tableStartRow}:${lastColumn}${lastRow}"/>
+  <pageMargins left="0.4" right="0.4" top="0.6" bottom="0.6" header="0.3" footer="0.3"/>
+</worksheet>`;
+
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="3">
+    <numFmt numFmtId="164" formatCode="&quot;INR &quot;#,##0.00"/>
+    <numFmt numFmtId="165" formatCode="#,##0.00"/>
+    <numFmt numFmtId="166" formatCode="0.00%"/>
+  </numFmts>
+  <fonts count="4">
+    <font><sz val="11"/><color rgb="FF111827"/><name val="Aptos"/></font>
+    <font><b/><sz val="18"/><color rgb="FFFFFFFF"/><name val="Aptos Display"/></font>
+    <font><b/><sz val="11"/><color rgb="FF111827"/><name val="Aptos"/></font>
+    <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Aptos"/></font>
+  </fonts>
+  <fills count="5">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF111827"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFFFE500"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFF8FAFC"/><bgColor indexed="64"/></patternFill></fill>
+  </fills>
+  <borders count="2">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border><left style="thin"><color rgb="FFE5E7EB"/></left><right style="thin"><color rgb="FFE5E7EB"/></right><top style="thin"><color rgb="FFE5E7EB"/></top><bottom style="thin"><color rgb="FFE5E7EB"/></bottom><diagonal/></border>
+  </borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="11">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
+    <xf numFmtId="165" fontId="2" fillId="4" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
+    <xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>
+    <xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>
+    <xf numFmtId="166" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>
+  </cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+
+  const sharedStringsXml = buildSharedStringsXml(sharedStrings);
+
+  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Procurement Report" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`;
+
+  return createZipBlob([
+    {
+      name: "[Content_Types].xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>`,
+    },
+    {
+      name: "_rels/.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`,
+    },
+    {
+      name: "docProps/core.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:title>Procurement Report</dc:title>
+  <dc:creator>Stack n Stock Procurement Dashboard</dc:creator>
+  <dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created>
+</cp:coreProperties>`,
+    },
+    {
+      name: "docProps/app.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>Stack n Stock Procurement Dashboard</Application>
+</Properties>`,
+    },
+    {
+      name: "xl/workbook.xml",
+      content: workbookXml,
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>`,
+    },
+    {
+      name: "xl/styles.xml",
+      content: stylesXml,
+    },
+    {
+      name: "xl/sharedStrings.xml",
+      content: sharedStringsXml,
+    },
+    {
+      name: "xl/worksheets/sheet1.xml",
+      content: sheetXml,
+    },
+  ]);
+}
+
+function buildSourcingAuditWorkbook() {
+  const sharedStrings = { items: [], map: new Map() };
+  const derived = buildDerived();
+  const pos = (derived.pos || [])
+    .slice()
+    .sort((a, b) => comparePoNumbers(a.poNumber, b.poNumber));
+  const sourceRows = allRows();
+  const poByNumber = new Map(pos.map((po) => [cleanText(po.poNumber), po]));
+  const productQuoteCounts = new Map(
+    (derived.products || []).map((product) => [
+      cleanText(product.productName),
+      Math.max(1, number(product.vendorCount)),
+    ]),
+  );
+  const lineItems = sourceRows
+    .filter((row) => inferLineType(row.itemDesc, row.lineType) !== "charge")
+    .sort((a, b) => {
+      const poCompare = comparePoNumbers(a.poNumber, b.poNumber);
+      if (poCompare !== 0) return poCompare;
+      return cleanText(a.itemDesc).localeCompare(cleanText(b.itemDesc), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    });
+
+  const cell = (value = "", type = "text", style = 0, cachedValue = null) => ({
+    value,
+    type,
+    style,
+    cachedValue,
+  });
+  const header = (values) => values.map((value) => cell(value, "text", 1));
+  const yesNo = (value) => (value ? "Yes" : "No");
+  const auditVendorName = (value) => {
+    const name = cleanText(value);
+    const raw = normalizeKey(name);
+    if (
+      raw === "MISUMI" ||
+      raw === "MISUMI INDIA" ||
+      raw === "MISUMI INDIA PVT LTD" ||
+      raw === "MISUMI INDIA PRIVATE LIMITED"
+    )
+      return "Misumi India Pvt Ltd";
+    return name;
+  };
+  const poLinesByNumber = new Map();
+  sourceRows.forEach((row) => {
+    const poNumber = cleanText(row.poNumber);
+    if (!poNumber) return;
+    if (!poLinesByNumber.has(poNumber)) poLinesByNumber.set(poNumber, []);
+    poLinesByNumber.get(poNumber).push(row);
+  });
+  const totalAmount = (po) => Math.max(0, roundMoney(number(po.poTotal)));
+  const paidAmount = (po) => Math.max(0, roundMoney(number(po.amountPaid)));
+  const pendingBalance = (po) =>
+    Math.max(0, roundMoney(totalAmount(po) - paidAmount(po)));
+  const poRecords = (po) => [
+    po,
+    ...(poLinesByNumber.get(cleanText(po.poNumber)) || []),
+  ];
+  const firstField = (records, keys) => {
+    for (const record of records) {
+      for (const key of keys) {
+        const value = cleanText(record?.[key]);
+        if (value) return value;
+      }
+    }
+    return "";
+  };
+  const invoiceNumber = (po) =>
+    firstField(poRecords(po), [
+      "invoiceNumber",
+      "invoiceNo",
+      "invoice_no",
+      "billNo",
+      "billNumber",
+      "bill_no",
+    ]);
+  const invoiceDate = (po) =>
+    firstField(poRecords(po), [
+      "invoiceDate",
+      "invoice_date",
+      "billDate",
+      "bill_date",
+      "voucherDate",
+      "voucher_date",
+    ]);
+  const hasInvoiceTrace = (po) => Boolean(invoiceNumber(po) && invoiceDate(po));
+  const gstCorrect = (po) => {
+    const lines = poLinesByNumber.get(cleanText(po.poNumber)) || [];
+    const hasTax = number(po.taxTotal) > 0 || lines.some(
+      (line) => number(line.itemTaxAmount) > 0 || number(line.itemTaxPercent) > 0,
+    );
+    if (hasTax) return "Yes";
+    return totalAmount(po) > 0 ? "N/A" : "No";
+  };
+  const formulaCell = (formula, style = 0, cachedValue = null) =>
+    cell(formula, "formula", style, cachedValue);
+  const addWorkingDays = (days) => {
+    const date = todayDateOnly();
+    let remaining = Math.max(0, Number(days) || 0);
+    while (remaining > 0) {
+      date.setDate(date.getDate() + 1);
+      const weekday = date.getDay();
+      if (weekday !== 0 && weekday !== 6) remaining -= 1;
+    }
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  };
+  const auditCategory = (po) => {
+    const rawMaterial = normalizeKey(po.materialType);
+    const source = normalizeKey(po.source);
+    const vendor = normalizeKey(po.vendorName);
+    const items = (poLinesByNumber.get(cleanText(po.poNumber)) || [])
+      .map((row) => normalizeKey(row.itemDesc))
+      .join(" ");
+    const searchable = `${rawMaterial} ${source} ${vendor} ${items}`;
+    if (vendor.includes("AMAZON") || source.includes("AMAZON"))
+      return "Amazon / Online Purchase";
+    if (rawMaterial === "RTO" || searchable.includes(" RTO ")) return "RTO";
+    if (rawMaterial === "MTO" || searchable.includes(" MTO ")) return "MTO";
+    if (/(STEEL|ROD|PLATE|PIPE|SS|MS|ALUMINIUM|ALUMINUM|BRASS|COPPER|PLYWOOD|GLASS)/.test(searchable))
+      return "Raw Material";
+    if (/(MOTOR|SENSOR|WIRE|CABLE|ELECTRIC|ELECTRICAL|LED|SWITCH|SMPS|BATTERY|RELAY)/.test(searchable))
+      return "Electrical";
+    if (/(DRILL|CUTTER|TOOL|BLADE|TAP|DIE|BIT|SPANNER|WRENCH)/.test(searchable))
+      return "Tools";
+    if (/(TAPE|GLUE|OIL|GREASE|PAINT|SCREW|BOLT|NUT|WASHER|CONSUMABLE)/.test(searchable))
+      return "Consumables";
+    if (/(FABRICAT|WELD|MACHIN|FRAME|BRACKET|BENDING|CUTTING)/.test(searchable))
+      return "Fabrication";
+    if (/(BEARING|PULLEY|BELT|WHEEL|GEAR|SHAFT|SPRING|VALVE|COUPLING|CHAIN|ROLLER)/.test(searchable))
+      return "Mechanical";
+    return "Bought Out";
+  };
+  const auditPayment = (po) => {
+    const total = totalAmount(po);
+    const paid = paidAmount(po);
+    if (paid <= 0) return "Pending";
+    if (total > 0 && paid >= total) return "Paid";
+    if (paid > 0) return "Partially Paid";
+    return "Pending";
+  };
+  const auditDelivery = (po) => {
+    const status = displayDeliveryStatus(po);
+    if (status === "Delivered") return "Delivered";
+    if (status === "Partially Delivered") return "Partial";
+    return "Pending";
+  };
+  const materialReceived = (po) => {
+    const status = auditDelivery(po);
+    if (status === "Delivered") return "Full";
+    if (status === "Partial") return "Partial";
+    return "None";
+  };
+  const invoiceAvailable = (po) => yesNo(hasInvoiceTrace(po));
+  const paymentProofAvailable = (po) => yesNo(paidAmount(po) > 0);
+  const grnAvailable = (po) => yesNo(materialReceived(po) === "Full");
+  const paymentApproval = (po) => yesNo(paidAmount(po) > 0);
+  const hasDocumentGap = (po) =>
+    invoiceAvailable(po) === "No" ||
+    paymentProofAvailable(po) === "No" ||
+    grnAvailable(po) === "No";
+  const hasClaimedPaidWithoutAmount = (po) =>
+    normalizePaymentStatus(po.paymentStatus) === "Paid" && paidAmount(po) <= 0;
+  const auditStatus = (po) => {
+    if (hasDocumentGap(po)) return "In Progress";
+    if (auditPayment(po) === "Paid" && auditDelivery(po) === "Delivered")
+      return "Closed";
+    if (paidAmount(po) > 0 || auditDelivery(po) !== "Pending")
+      return "In Progress";
+    return "Open";
+  };
+  const moneyAuditStatus = (po) => {
+    if (hasClaimedPaidWithoutAmount(po)) return "Major Gap";
+    if (isPoDelayed(po)) return "High Risk";
+    if (invoiceAvailable(po) === "No" || paymentProofAvailable(po) === "No") {
+      return auditPayment(po) === "Pending" ? "Open" : "Major Gap";
+    }
+    if (gstCorrect(po) === "No") return "Minor Gap";
+    if (grnAvailable(po) === "No") return "Minor Gap";
+    if (auditPayment(po) !== "Paid") return "Open";
+    if (materialReceived(po) !== "Full")
+      return "Minor Gap";
+    return "Clean";
+  };
+  const moneyAuditComments = (po) => {
+    const comments = [];
+    const gaps = [];
+    if (hasClaimedPaidWithoutAmount(po))
+      comments.push("Payment status was Paid but paid amount is 0; treated as Pending.");
+    if (paidAmount(po) > 0 && invoiceAvailable(po) === "No")
+      comments.push("Invoice number/date missing; invoice cannot be traced.");
+    if (invoiceAvailable(po) === "No") gaps.push("invoice");
+    if (paymentProofAvailable(po) === "No") gaps.push("payment proof");
+    if (grnAvailable(po) === "No") gaps.push("GRN");
+    if (gaps.length) comments.push(`Missing evidence: ${gaps.join(", ")}.`);
+    if (gstCorrect(po) === "N/A")
+      comments.push("GST not applicable or not captured; verify invoice if applicable.");
+    if (gstCorrect(po) === "No")
+      comments.push("GST needs verification before this spend can be clean.");
+    if (isPoDelayed(po)) comments.push("Delayed PO needs audit review.");
+    return comments.join(" ");
+  };
+
+  const poMasterRows = pos.map((po) => [
+    cell(po.poNumber),
+    cell(cleanText(po.poDate)),
+    cell(auditVendorName(po.vendorName)),
+    cell(auditCategory(po)),
+    cell(totalAmount(po), "money", 3),
+    cell(yesNo(number(po.taxTotal) > 0)),
+    cell(paidAmount(po), "money", 3),
+    cell(pendingBalance(po), "money", 3),
+    cell(auditPayment(po)),
+    cell(auditDelivery(po)),
+    cell(grnAvailable(po)),
+    cell(invoiceAvailable(po)),
+    cell(auditStatus(po)),
+  ]);
+
+  const repeatedProducts = new Set();
+  const lineRows = [];
+  for (let index = 0; index < Math.max(100, lineItems.length); index += 1) {
+    const rowNumber = index + 2;
+    const line = lineItems[index];
+    const po = line ? poByNumber.get(cleanText(line.poNumber)) || {} : {};
+    const itemName = cleanText(line?.itemDesc);
+    const quoteCount = productQuoteCounts.get(itemName) || 1;
+    const isRepeat = repeatedProducts.has(itemName);
+    if (itemName) repeatedProducts.add(itemName);
+    const delayed = line ? isPoDelayed(po) : false;
+    const risk = line ? (delayed ? "High" : quoteCount > 1 ? "Low" : "Medium") : "";
+    const lineTotal = line
+      ? roundMoney(number(line.quantityOrdered) * number(line.itemPrice))
+      : "";
+    lineRows.push([
+      cell(line?.poNumber || ""),
+      cell(itemName),
+      cell(line ? number(line.quantityOrdered) : "", "number", 4),
+      cell(line ? number(line.itemPrice) : "", "money", 3),
+      formulaCell(`=C${rowNumber}*D${rowNumber}`, 3, lineTotal),
+      cell(line ? (isRepeat ? "Repeat Sourcing" : "First Sourcing") : ""),
+      cell(line ? "First Audit" : ""),
+      cell(line ? "Production" : ""),
+      cell(line ? "Existing" : ""),
+      cell(line ? (delayed ? "Emergency" : "Normal") : ""),
+      cell(line ? quoteCount : "", "number", 4),
+      cell(line ? "Pending" : ""),
+      cell(line ? yesNo(quoteCount > 1) : ""),
+      cell(line ? yesNo(quoteCount > 1) : ""),
+      cell(risk),
+      cell(
+        line
+          ? risk === "Low"
+            ? "No immediate action"
+            : "Add quote comparison, benchmark, technical approval, backup vendor, or approved exception"
+          : "",
+      ),
+      cell(""),
+      cell(delayed ? "Delayed" : ""),
+      cell(""),
+    ]);
+  }
+
+  const vendorStats = new Map();
+  pos.forEach((po) => {
+    const key = auditVendorName(po.vendorName);
+    if (!key) return;
+    if (!vendorStats.has(key))
+      vendorStats.set(key, { pos: 0, delayed: 0, delivered: 0 });
+    const stat = vendorStats.get(key);
+    stat.pos += 1;
+    if (isPoDelayed(po)) stat.delayed += 1;
+    if (auditDelivery(po) === "Delivered") stat.delivered += 1;
+  });
+  const vendorNames = [
+    ...new Set([
+      ...pos.map((po) => auditVendorName(po.vendorName)).filter(Boolean),
+      ...(derived.vendors || [])
+        .map((vendor) => auditVendorName(vendor.vendorName))
+        .filter(Boolean),
+    ]),
+  ].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  const vendorClassification = (score) => {
+    if (score >= 85) return "Preferred";
+    if (score >= 70) return "Approved";
+    if (score >= 50) return "Conditional";
+    return "Replace";
+  };
+  const vendorRows = [];
+  for (let index = 0; index < Math.max(100, vendorNames.length); index += 1) {
+    const rowNumber = index + 2;
+    const vendorName = vendorNames[index] || "";
+    const stat = vendorStats.get(vendorName) || { pos: 0, delayed: 0 };
+    const deliveryScore = vendorName
+      ? Math.max(45, Math.round(90 - (stat.delayed / Math.max(stat.pos, 1)) * 35))
+      : "";
+    const scoreInputs = vendorName
+      ? [75, 80, deliveryScore, 75, 75, 70, 65]
+      : [];
+    const overallScore = scoreInputs.length
+      ? roundMoney(scoreInputs.reduce((sum, score) => sum + number(score), 0) / scoreInputs.length)
+      : "";
+    vendorRows.push([
+      cell(vendorName),
+      cell(vendorName ? 75 : "", "number", 4),
+      cell(vendorName ? 80 : "", "number", 4),
+      cell(deliveryScore, "number", 4),
+      cell(vendorName ? 75 : "", "number", 4),
+      cell(vendorName ? 75 : "", "number", 4),
+      cell(vendorName ? 70 : "", "number", 4),
+      cell(vendorName ? 65 : "", "number", 4),
+      formulaCell(`=AVERAGE(B${rowNumber}:H${rowNumber})`, 4, overallScore),
+      formulaCell(
+        `=IF(I${rowNumber}>=85,"Preferred",IF(I${rowNumber}>=70,"Approved",IF(I${rowNumber}>=50,"Conditional","Replace")))`,
+        0,
+        overallScore === "" ? "" : vendorClassification(overallScore),
+      ),
+    ]);
+  }
+
+  const moneyRows = pos.map((po) => {
+    const received = materialReceived(po);
+    const qtyReceived =
+      received === "Full"
+        ? number(po.totalQty)
+        : received === "Partial"
+          ? roundMoney(number(po.totalQty) / 2)
+          : 0;
+    return [
+      cell(po.poNumber),
+      cell(auditVendorName(po.vendorName)),
+      cell(invoiceNumber(po)),
+      cell(invoiceDate(po)),
+      cell(totalAmount(po), "money", 3),
+      cell(paidAmount(po), "money", 3),
+      cell("Yes"),
+      cell(invoiceAvailable(po)),
+      cell(paymentProofAvailable(po)),
+      cell(gstCorrect(po)),
+      cell(yesNo(number(po.totalChargeValue) > 0)),
+      cell(yesNo(number(po.totalChargeValue) > 0)),
+      cell(paymentApproval(po)),
+      cell(received),
+      cell(grnAvailable(po)),
+      cell(number(po.totalQty), "number", 4),
+      cell(qtyReceived, "number", 4),
+      cell(yesNo(received === "Full")),
+      cell(0, "number", 4),
+      cell(moneyAuditStatus(po)),
+      cell(moneyAuditComments(po)),
+    ];
+  });
+
+  const missingRows = [];
+  pos.forEach((po) => {
+    if (invoiceAvailable(po) === "No") {
+      missingRows.push([
+        cell(po.poNumber),
+        cell(auditVendorName(po.vendorName)),
+        cell("Invoice"),
+        cell("Pending"),
+        cell("Invoice number/date is missing, so invoice cannot be traced."),
+      ]);
+    }
+    if (paymentProofAvailable(po) === "No") {
+      missingRows.push([
+        cell(po.poNumber),
+        cell(auditVendorName(po.vendorName)),
+        cell("Payment Proof"),
+        cell("Pending"),
+        cell("Payment proof is missing or paid amount is not recorded."),
+      ]);
+    }
+    if (grnAvailable(po) === "No") {
+      missingRows.push([
+        cell(po.poNumber),
+        cell(auditVendorName(po.vendorName)),
+        cell("GRN"),
+        cell("Pending"),
+        cell("Material receipt is not marked full."),
+      ]);
+    }
+    if (gstCorrect(po) === "No") {
+      missingRows.push([
+        cell(po.poNumber),
+        cell(auditVendorName(po.vendorName)),
+        cell("GST Verification"),
+        cell("Pending"),
+        cell("GST correctness could not be verified."),
+      ]);
+    }
+  });
+
+  const risks = [];
+  pos.forEach((po) => {
+    const docGaps = [];
+    if (invoiceAvailable(po) === "No") docGaps.push("invoice");
+    if (paymentProofAvailable(po) === "No") docGaps.push("payment proof");
+    if (grnAvailable(po) === "No") docGaps.push("GRN");
+    if (hasClaimedPaidWithoutAmount(po)) {
+      risks.push({
+        item: po.poNumber,
+        finding: "Paid status has zero paid amount",
+        risk: "Payment Verification Risk",
+        evidence: `${auditVendorName(po.vendorName)} - payment status Paid, paid amount INR 0.00`,
+        impact: "Spend cannot be verified from payment evidence",
+        action: "Correct payment status or update paid amount with proof",
+        priority: "High",
+        dueDate: addWorkingDays(1),
+      });
+    }
+    if (docGaps.length) {
+      risks.push({
+        item: po.poNumber,
+        finding: "Missing audit documents",
+        risk: "Documentation Gap",
+        evidence: `${auditVendorName(po.vendorName)} - missing ${docGaps.join(", ")}`,
+        impact: "Audit status must stay In Progress until evidence is attached",
+        action: "Collect missing invoice, payment proof, or GRN evidence",
+        priority: docGaps.includes("invoice") || docGaps.includes("payment proof") ? "High" : "Medium",
+        dueDate: addWorkingDays(docGaps.includes("invoice") || docGaps.includes("payment proof") ? 3 : 2),
+      });
+    }
+    if (isPoDelayed(po)) {
+      risks.push({
+        item: po.poNumber,
+        finding: "PO delivery delayed",
+        risk: "Delivery Risk",
+        evidence: `${auditVendorName(po.vendorName)} - delivery date ${formatDate(po.deliveryDate)}`,
+        impact: "Production or project schedule may slip",
+        action: "Confirm revised delivery date and escalation owner",
+        priority: "High",
+        dueDate: addWorkingDays(1),
+      });
+    }
+    if (pendingBalance(po) > 0) {
+      risks.push({
+        item: po.poNumber,
+        finding: "Payment balance pending",
+        risk: "Financial Follow-up",
+        evidence: `Pending payment ${money(pendingBalance(po))}`,
+        impact: "Vendor payment closure pending",
+        action: "Verify invoice, approval, and payment plan",
+        priority: "Medium",
+        dueDate: addWorkingDays(3),
+      });
+    }
+  });
+  lineItems.forEach((line) => {
+    const quoteCount = productQuoteCounts.get(cleanText(line.itemDesc)) || 1;
+    if (quoteCount <= 1) {
+      risks.push({
+        item: line.poNumber,
+        finding: "Single-source / validation evidence pending",
+        risk: "Sourcing Risk",
+        evidence: cleanText(line.itemDesc),
+        impact: "No quote comparison, technical validation, price benchmark, or backup vendor evidence",
+        action: "Add quote comparison, benchmark, technical approval, backup vendor, or approved exception",
+        priority: "Medium",
+        dueDate: addWorkingDays(5),
+      });
+    }
+  });
+  const riskRows = risks.slice(0, 200).map((risk, index) => [
+    cell(`R-${String(index + 1).padStart(3, "0")}`),
+    cell(risk.item),
+    cell(risk.finding),
+    cell(risk.risk),
+    cell(risk.evidence),
+    cell(risk.impact),
+    cell(risk.action),
+    cell("Procurement"),
+    cell(risk.priority),
+    cell(risk.dueDate || ""),
+    cell("Open"),
+  ]);
+  const actionRows = risks.slice(0, 200).map((risk, index) => [
+    cell(`A-${String(index + 1).padStart(3, "0")}`),
+    cell(risk.action),
+    cell("Procurement"),
+    cell(risk.priority),
+    cell(risk.dueDate || ""),
+    cell("Open"),
+    cell(`${risk.item}: ${risk.finding}`),
+  ]);
+
+  const poCount = pos.length;
+  const kpiTotalPoValue = roundMoney(pos.reduce((sum, po) => sum + totalAmount(po), 0));
+  const kpiPaidAmount = roundMoney(pos.reduce((sum, po) => sum + paidAmount(po), 0));
+  const kpiPendingPayment = roundMoney(
+    pos.reduce((sum, po) => sum + pendingBalance(po), 0),
+  );
+  const kpiMissingInvoiceSpend = roundMoney(
+    pos.reduce(
+      (sum, po) => sum + (invoiceAvailable(po) === "No" ? totalAmount(po) : 0),
+      0,
+    ),
+  );
+  const kpiMissingGrnSpend = roundMoney(
+    pos.reduce(
+      (sum, po) => sum + (grnAvailable(po) === "No" ? totalAmount(po) : 0),
+      0,
+    ),
+  );
+  const kpiItemsWithTwoQuotes = lineItems.filter(
+    (line) => (productQuoteCounts.get(cleanText(line.itemDesc)) || 1) >= 2,
+  ).length;
+  const kpiAdvancePaidMaterialPending = roundMoney(
+    pos.reduce(
+      (sum, po) =>
+        sum + (paymentApproval(po) === "Yes" && materialReceived(po) === "None" ? paidAmount(po) : 0),
+      0,
+    ),
+  );
+  const kpiOnTimeDeliveryRate = poCount
+    ? pos.filter((po) => auditDelivery(po) === "Delivered").length / poCount
+    : 0;
+  const kpiFirstPassAcceptanceRate = poCount
+    ? pos.filter((po) => materialReceived(po) === "Full").length / poCount
+    : 0;
+  const kpiRfqComplianceRate = lineItems.length
+    ? kpiItemsWithTwoQuotes / lineItems.length
+    : 0;
+  const kpiRows = [
+    header(["KPI", "Value"]),
+    [cell("Total PO Value"), formulaCell("=SUM('PO Master'!E:E)", 3, kpiTotalPoValue)],
+    [cell("Total Paid Amount"), formulaCell("=SUM('PO Master'!G:G)", 3, kpiPaidAmount)],
+    [cell("Pending Payment"), formulaCell("=SUM('PO Master'!H:H)", 3, kpiPendingPayment)],
+    [cell("Spend Missing Invoice"), formulaCell('=SUMIF(\'PO Master\'!L:L,"No",\'PO Master\'!E:E)', 3, kpiMissingInvoiceSpend)],
+    [cell("Spend Missing GRN"), formulaCell('=SUMIF(\'PO Master\'!K:K,"No",\'PO Master\'!E:E)', 3, kpiMissingGrnSpend)],
+    [cell("Items With 2+ Quotes"), formulaCell('=COUNTIF(\'Line Item Audit\'!K:K,">=2")', 4, kpiItemsWithTwoQuotes)],
+    [cell("Advance Paid but Material Pending"), formulaCell('=SUMIFS(\'Money Spent Audit\'!F:F, \'Money Spent Audit\'!M:M,"Yes", \'Money Spent Audit\'!N:N,"None")', 3, kpiAdvancePaidMaterialPending)],
+    [cell("On-Time Delivery Rate"), formulaCell('=IF(COUNTA(\'PO Master\'!A2:A1000)=0,0, COUNTIF(\'PO Master\'!J2:J1000,"Delivered")/COUNTA(\'PO Master\'!A2:A1000))', 9, kpiOnTimeDeliveryRate)],
+    [cell("First-Pass Acceptance Rate"), formulaCell('=IF(COUNTA(\'Money Spent Audit\'!A2:A1000)=0,0, COUNTIF(\'Money Spent Audit\'!R2:R1000,"Yes")/COUNTA(\'Money Spent Audit\'!A2:A1000))', 9, kpiFirstPassAcceptanceRate)],
+    [cell("RFQ Compliance Rate"), formulaCell('=IF(COUNTA(\'Line Item Audit\'!A2:A1000)=0,0, COUNTIF(\'Line Item Audit\'!K2:K1000, ">=2")/COUNTA(\'Line Item Audit\'!A2:A1000))', 9, kpiRfqComplianceRate)],
+    [cell("PO-Before-Delivery Compliance"), formulaCell('=IF(COUNTA(\'Money Spent Audit\'!A2:A1000)=0,0, COUNTIF(\'Money Spent Audit\'!G2:G1000,"Yes")/COUNTA(\'Money Spent Audit\'!A2:A1000))', 9, poCount ? 1 : 0)],
+  ];
+
+  const howRows = [
+    [cell("Sourcing + Money Spent Audit: How to Fill", "text", 5)],
+    [],
+    [cell("Golden Rules for Everyone Filling This Workbook", "text", 6)],
+    [cell("1", "text", 8), cell("Use one row per PO in PO Master and one row per item/line in Line Item Audit.", "text", 2)],
+    [cell("2", "text", 8), cell("Use exact dropdown-style words like Yes, No, Pending, Delivered, High, Medium, Low. KPI formulas depend on consistent words.", "text", 2)],
+    [cell("3", "text", 8), cell("Do not leave PO Number blank. It is the common link between sheets.", "text", 2)],
+    [cell("4", "text", 8), cell("Do not overwrite formula cells unless instructed. Example: Total Value and KPI Summary formulas.", "text", 2)],
+    [cell("5", "text", 8), cell("If evidence is missing, do not assume. Mark No or Pending and add it in Missing Documents.", "text", 2)],
+    [cell("6", "text", 8), cell("First Sourcing is judged on validation and baseline creation, not only savings. Repeat Sourcing is judged on optimization.", "text", 2)],
+    [],
+    [cell("Step-by-Step Filling Workflow", "text", 6)],
+    ["Step", "Who Fills", "Sheet", "What to Fill", "When to Fill", "Output / Check"].map((value) => cell(value, "text", 7)),
+    [cell("1"), cell("Procurement"), cell("PO Master"), cell("PO number, date, vendor, category, total PO value, GST, advance/balance, payment/delivery status"), cell("After PO is issued or imported from Zoho"), cell("Every PO has one master row")],
+    [cell("2"), cell("Procurement + Engineering"), cell("Line Item Audit"), cell("Item, qty, unit price, purchase type, audit type, item maturity, quote count, technical validation, benchmark, backup vendor, risk"), cell("After quote comparison / vendor selection"), cell("Each PO line is classified and risk-tagged")],
+    [cell("3"), cell("Finance/Admin"), cell("Money Spent Audit"), cell("Invoice amount, paid amount, PO available, invoice available, payment proof, GST, freight, extra charges, payment approval"), cell("At payment or invoice booking stage"), cell("Paid amount is supported by evidence")],
+    [cell("4"), cell("Stores / Inward"), cell("Money Spent Audit"), cell("Material received, GRN available, ordered qty, received qty"), cell("When material reaches site/store"), cell("Receipt status is clear")],
+    [cell("5"), cell("Quality / Engineering"), cell("Money Spent Audit"), cell("Inspection passed, rejection qty, comments"), cell("After inspection or trial"), cell("Accepted/rejected quantity is visible")],
+    [cell("6"), cell("Procurement / Audit Lead"), cell("Vendor Audit"), cell("Vendor score for price, quality, delivery, technical capability, responsiveness, payment terms, documentation"), cell("Weekly or after major purchase batch"), cell("Vendor classified as Preferred / Approved / Conditional / Replace")],
+    [cell("7"), cell("Audit Lead"), cell("Missing Documents, Risk Register, Action Tracker"), cell("Document gaps, findings, risks, corrective actions, owners, due dates"), cell("During audit review"), cell("Each issue has owner and due date")],
+    [cell("8"), cell("Founder / Audit Lead"), cell("KPI Summary"), cell("Review formulas only, do not manually edit values"), cell("Weekly review"), cell("Audit dashboard ready for decisions")],
+    [],
+    [cell("Role Ownership Matrix", "text", 6)],
+    ["Role", "Primary Responsibility", "Must Not Do", "Final Check"].map((value) => cell(value, "text", 7)),
+    [cell("Procurement Owner"), cell("Fill PO Master, Line Item Audit, quote count, vendor type, price benchmark, backup vendor and sourcing risk."), cell("Do not mark technical validation as approved without Engineering confirmation."), cell("All critical items have quote count and risk level.")],
+    [cell("Engineering / Requester"), cell("Confirm item spec, drawing, technical fit, sample/trial requirement, item maturity and inspection inputs."), cell("Do not approve commercial price without procurement comparison."), cell("Technical Validation is Approved/Pending/Failed with comment if needed.")],
+    [cell("Finance/Admin"), cell("Verify invoice, payment proof, GST, payment approval, advance/balance and paid amount."), cell("Do not mark payment proof Yes unless bank/Zoho proof exists."), cell("Paid amount matches invoice/PO or variance is explained.")],
+    [cell("Stores / Inward"), cell("Update material received status, received quantity and GRN availability."), cell("Do not mark Full received unless quantity physically received matches order."), cell("GRN and quantity received are aligned.")],
+    [cell("Quality / Engineering"), cell("Update inspection status, rejection quantity and quality comments."), cell("Do not mark Inspection Passed Yes before actual check/trial."), cell("Rejected qty and remarks are captured.")],
+    [cell("Audit Lead"), cell("Review Missing Documents, Risk Register, Action Tracker and KPI Summary."), cell("Do not close action without evidence."), cell("High-risk items have action owner and due date.")],
+    [],
+    [cell("Sheet-wise Filling Instructions", "text", 6)],
+    ["Sheet", "Mandatory Fields", "How to Fill", "Common Mistake to Avoid"].map((value) => cell(value, "text", 7)),
+    [cell("PO Master"), cell("PO Number, PO Date, Vendor Name, Category, Total PO Value, Payment Status, Delivery Status"), cell("One row per PO. Use total PO value including GST if that is how PO is issued. Keep Advance Paid and Pending Payment numeric."), cell("Do not create multiple rows for the same PO unless it is a revised PO.")],
+    [cell("Line Item Audit"), cell("PO Number, Item, Qty, Unit Price, Purchase Type, Audit Type, Quote Count, Technical Validation, Risk Level"), cell("One row per item. Mark First Sourcing/Repeat Sourcing and First Audit/Re-audit carefully."), cell("Do not judge first sourcing only on savings; focus on validation and benchmark.")],
+    [cell("Vendor Audit"), cell("Vendor Name and scores from 0-100"), cell("Score realistically. Overall Score and Classification are automatic."), cell("Do not type text in score columns; use numbers only.")],
+    [cell("Money Spent Audit"), cell("PO Number, Invoice Amount, Paid Amount, PO/Invoice/Payment Proof flags, Material Received, GRN, Inspection Passed"), cell("Use Yes/No/None consistently. Add comments for any mismatch."), cell("Do not mark spend clean if GRN or inspection is missing.")],
+    [cell("Missing Documents"), cell("PO Number, Vendor, Document Type, Status"), cell("Add every missing document here immediately. Status can be Pending/Received/Not Required."), cell("Do not keep missing documents only in WhatsApp/email memory.")],
+    [cell("Risk Register"), cell("Finding, Risk, Evidence, Impact, Action, Owner, Priority, Status"), cell("Every red flag should become a risk item with evidence and action."), cell("Do not write vague findings without PO number or evidence.")],
+    [cell("Action Tracker"), cell("Action ID, Description, Owner, Priority, Due Date, Status"), cell("Use this to close audit gaps. Update weekly."), cell("Do not close an action unless evidence is available.")],
+    [cell("KPI Summary"), cell("No manual input required"), cell("Only review. Values come from other sheets."), cell("Do not overwrite formulas.")],
+    [],
+    [cell("Use These Exact Values for Clean KPI Calculation", "text", 6)],
+    ["Field Type", "Allowed Values"].map((value) => cell(value, "text", 7)),
+    [cell("Yes/No fields"), cell("Yes, No")],
+    [cell("Payment Status"), cell("Pending, Partially Paid, Paid")],
+    [cell("Delivery Status"), cell("Pending, Partial, Delivered")],
+    [cell("Purchase Type"), cell("First Sourcing, Repeat Sourcing")],
+    [cell("Audit Type"), cell("First Audit, Re-audit")],
+    [cell("Item Maturity"), cell("Development, Prototype, Production")],
+    [cell("Technical Validation"), cell("Pending, Yes, No, Approved, Failed")],
+    [cell("Risk / Priority"), cell("High, Medium, Low")],
+    [cell("Material Received"), cell("None, Partial, Full")],
+    [cell("Status"), cell("Open, In Progress, Closed")],
+    [cell("Money Audit Status"), cell("Clean, Minor Gap, Major Gap, Open, High Risk")],
+  ];
+
+  const sheets = [
+    { name: "PO Master", widths: [15, 15, 20, 20, 18, 15, 15, 15, 18, 18, 15, 18, 15], rows: [header(["PO Number", "PO Date", "Vendor Name", "Category", "Total PO Value", "GST Included", "Advance Paid", "Pending Payment", "Payment Status", "Delivery Status", "GRN Available", "Invoice Available", "Audit Status"]), ...poMasterRows], validations: [["F2:F1000", '"Yes,No"'], ["I2:I1000", '"Pending,Partially Paid,Paid"'], ["J2:J1000", '"Pending,Partial,Delivered"'], ["K2:L1000", '"Yes,No"'], ["M2:M1000", '"Open,In Progress,Closed"']] },
+    { name: "Line Item Audit", widths: [15, 30, 10, 12, 15, 15, 15, 18, 18, 18, 12, 18, 22, 22, 15, 25, 15, 18, 18], rows: [header(["PO Number", "Item Name/Description", "Quantity", "Unit Price", "Total Value", "Purchase Type", "Audit Type", "Item Maturity", "Vendor Type", "Purchase Urgency", "Quote Count", "Technical Validation", "Price Benchmark Available", "Backup Vendor Available", "Risk Level", "Action Required", "Price Variance", "Delivery Variance", "Quality Variance"]), ...lineRows], validations: [["F2:F1000", '"First Sourcing,Repeat Sourcing"'], ["G2:G1000", '"First Audit,Re-audit"'], ["H2:H1000", '"Development,Prototype,Production"'], ["I2:I1000", '"New,Existing,Preferred,Conditional"'], ["J2:J1000", '"Normal,Emergency"'], ["L2:L1000", '"Pending,Yes,No,Approved,Failed"'], ["M2:N1000", '"Yes,No"'], ["O2:O1000", '"High,Medium,Low"']] },
+    { name: "Vendor Audit", widths: [20, 22, 15, 20, 20, 15, 20, 25, 15, 15], rows: [header(["Vendor Name", "Price Competitiveness", "Quality", "Delivery Reliability", "Technical Capability", "Responsiveness", "Payment Flexibility", "Documentation Discipline", "Overall Score", "Classification"]), ...vendorRows] },
+    { name: "Money Spent Audit", widths: [15, 20, 18, 15, 18, 18, 15, 18, 15, 15, 18, 18, 18, 18, 18, 18, 18, 18, 20, 20, 25], rows: [header(["PO Number", "Vendor Name", "Invoice Number", "Invoice Date", "Invoice Amount", "Paid Amount", "PO Available", "Invoice Available", "Payment Proof", "GST Correct", "Freight Included", "Extra Charges", "Payment Approval", "Material Received", "GRN Available", "Quantity Ordered", "Quantity Received", "Inspection Passed", "Rejection Quantity", "Status", "Comments"]), ...moneyRows], validations: [["G2:I1000", '"Yes,No"'], ["J2:J1000", '"Yes,No,N/A"'], ["K2:M1000", '"Yes,No"'], ["N2:N1000", '"None,Partial,Full"'], ["O2:O1000", '"Yes,No"'], ["R2:R1000", '"Yes,No"'], ["T2:T1000", '"Clean,Minor Gap,Major Gap,Open,High Risk"']] },
+    { name: "Missing Documents", widths: [15, 20, 20, 15, 30], rows: [header(["PO Number", "Vendor Name", "Document Type", "Status", "Comments"]), ...missingRows], validations: [["D2:D1000", '"Pending,Received,Not Required"']] },
+    { name: "Risk Register", widths: [10, 15, 30, 20, 30, 20, 30, 20, 15, 18, 12], rows: [header(["ID", "Item/PO", "Finding", "Risk", "Evidence", "Impact", "Action", "Owner", "Priority", "Due Date", "Status"]), ...riskRows], validations: [["I2:I1000", '"High,Medium,Low"'], ["K2:K1000", '"Open,In Progress,Closed"']] },
+    { name: "Action Tracker", widths: [12, 30, 20, 15, 18, 15, 25], rows: [header(["Action ID", "Description", "Owner", "Priority", "Due Date", "Status", "Comments"]), ...actionRows], validations: [["D2:D1000", '"High,Medium,Low"'], ["F2:F1000", '"Open,In Progress,Closed"']] },
+    { name: "KPI Summary", widths: [40, 20], rows: kpiRows },
+    { name: "How to Fill", widths: [16, 36, 24, 42, 22, 35, 16, 16], rows: howRows, merges: ["A1:H1", "A3:H3", "A11:H11", "A22:H22", "A31:H31", "A42:H42"] },
+  ];
+
+  function validationsXml(validations = []) {
+    if (!validations.length) return "";
+    return `<dataValidations count="${validations.length}">${validations
+      .map(([sqref, formula]) => `<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="${xmlEscape(sqref)}"><formula1>${xmlEscape(formula)}</formula1></dataValidation>`)
+      .join("")}</dataValidations>`;
+  }
+
+  function worksheetXml(spec) {
+    const colCount = spec.widths.length;
+    const rowCount = Math.max(1, spec.rows.length);
+    const rowsXml = spec.rows
+      .map((row, rowIndex) => {
+        const padded = Array.from({ length: colCount }, (_, index) => row[index] || cell(""));
+        return xlsxRow(rowIndex + 1, padded, 0, sharedStrings);
+      })
+      .join("");
+    const merges = spec.merges?.length
+      ? `<mergeCells count="${spec.merges.length}">${spec.merges.map((ref) => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells>`
+      : "";
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1:${xlsxColumnName(colCount - 1)}${rowCount}"/>
+  <sheetFormatPr defaultRowHeight="18"/>
+  <cols>${spec.widths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("")}</cols>
+  <sheetData>${rowsXml}</sheetData>
+  ${merges}
+  ${validationsXml(spec.validations)}
+  <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
+</worksheet>`;
+  }
+
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="3"><numFmt numFmtId="164" formatCode="&quot;INR &quot;#,##0.00"/><numFmt numFmtId="165" formatCode="#,##0.00"/><numFmt numFmtId="166" formatCode="0.00%"/></numFmts>
+  <fonts count="5"><font><sz val="11"/><color rgb="FF111827"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FF111827"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="14"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><sz val="11"/><color rgb="FF111827"/><name val="Calibri"/></font></fonts>
+  <fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE0F2F1"/><bgColor indexed="64"/></patternFill></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="10">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="0" fontId="3" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="top" wrapText="1"/></xf>
+    <xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+  </cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+
+  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((sheet, index) => `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("")}</sheets><calcPr fullCalcOnLoad="1"/></workbook>`;
+  const sheetFiles = sheets.map((sheet, index) => ({
+    name: `xl/worksheets/sheet${index + 1}.xml`,
+    content: worksheetXml(sheet),
+  }));
+  const sharedStringsXml = buildSharedStringsXml(sharedStrings);
+
+  return createZipBlob([
+    { name: "[Content_Types].xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>` },
+    { name: "_rels/.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>` },
+    { name: "docProps/core.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Sourcing Money Audit with SOP</dc:title><dc:creator>Stack n Stock Procurement Dashboard</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created></cp:coreProperties>` },
+    { name: "docProps/app.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Stack n Stock Procurement Dashboard</Application></Properties>` },
+    { name: "xl/workbook.xml", content: workbookXml },
+    { name: "xl/_rels/workbook.xml.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId${sheets.length + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>` },
+    { name: "xl/styles.xml", content: stylesXml },
+    { name: "xl/sharedStrings.xml", content: sharedStringsXml },
+    ...sheetFiles,
+  ]);
+}
+
+function mechanicalAnalysisRowsForSheet(sheetName, rows) {
+  const columns = MECHANICAL_ANALYSIS_COLUMNS[sheetName] || [];
+  const cell = (value = "", type = "text", style = 0) => ({
+    value,
+    type,
+    style,
+  });
+  return [
+    columns.map((column) => cell(column.label, "text", 1)),
+    ...rows.map((row) =>
+      columns.map((column) => {
+        const type = column.type === "percent" ? "number" : column.type;
+        const style = column.type === "money" ? 3 : column.type === "number" || column.type === "percent" ? 4 : 0;
+        return cell(row[column.key], type, style);
+      }),
+    ),
+  ];
+}
+
+function buildMechanicalAnalysisWorkbook() {
+  const sharedStrings = { items: [], map: new Map() };
+  const analysis = buildMechanicalAnalysis(buildDerived());
+  const sheets = MECHANICAL_ANALYSIS_TABS.map((sheetName) => {
+    const columns = MECHANICAL_ANALYSIS_COLUMNS[sheetName] || [];
+    return {
+      name: sheetName,
+      widths: columns.map((column) => column.width || 18),
+      rows: mechanicalAnalysisRowsForSheet(sheetName, analysis.tables[sheetName] || []),
+    };
+  });
+  function cell(value = "", type = "text", style = 0) {
+    return { value, type, style };
+  }
+  function worksheetXml(spec) {
+    const colCount = Math.max(1, spec.widths.length);
+    const rowCount = Math.max(1, spec.rows.length);
+    const rowsXml = spec.rows
+      .map((row, rowIndex) => {
+        const padded = Array.from({ length: colCount }, (_, index) => row[index] || cell(""));
+        return xlsxRow(rowIndex + 1, padded, 0, sharedStrings);
+      })
+      .join("");
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1:${xlsxColumnName(colCount - 1)}${rowCount}"/>
+  <sheetFormatPr defaultRowHeight="18"/>
+  <cols>${spec.widths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("")}</cols>
+  <sheetData>${rowsXml}</sheetData>
+  <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
+</worksheet>`;
+  }
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="2"><numFmt numFmtId="164" formatCode="&quot;INR &quot;#,##0.00"/><numFmt numFmtId="165" formatCode="#,##0.00"/></numFmts>
+  <fonts count="3"><font><sz val="11"/><color rgb="FF111827"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="12"/><color rgb="FF111827"/><name val="Calibri"/></font></fonts>
+  <fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor indexed="64"/></patternFill></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="5">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+  </cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((sheet, index) => `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("")}</sheets><calcPr fullCalcOnLoad="1"/></workbook>`;
+  const sheetFiles = sheets.map((sheet, index) => ({
+    name: `xl/worksheets/sheet${index + 1}.xml`,
+    content: worksheetXml(sheet),
+  }));
+  const sharedStringsXml = buildSharedStringsXml(sharedStrings);
+  return createZipBlob([
+    { name: "[Content_Types].xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>` },
+    { name: "_rels/.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>` },
+    { name: "docProps/core.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Mechanical Procurement Analysis</dc:title><dc:creator>Stack n Stock Procurement Dashboard</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created></cp:coreProperties>` },
+    { name: "docProps/app.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Stack n Stock Procurement Dashboard</Application></Properties>` },
+    { name: "xl/workbook.xml", content: workbookXml },
+    { name: "xl/_rels/workbook.xml.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId${sheets.length + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>` },
+    { name: "xl/styles.xml", content: stylesXml },
+    { name: "xl/sharedStrings.xml", content: sharedStringsXml },
+    ...sheetFiles,
+  ]);
+}
+
+function exportMechanicalAnalysisXlsx() {
+  const analysis = buildMechanicalAnalysis(buildDerived());
+  if (!analysis.summary.lineCount) {
+    alert("No mechanical procurement data is available to export.");
+    return;
+  }
+  const blob = buildMechanicalAnalysisWorkbook();
+  const link = document.createElement("a");
+  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  link.href = URL.createObjectURL(blob);
+  link.download = `mechanical-procurement-analysis-${timestamp}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function exportProcurementReportXlsx() {
+  const rows = buildProcurementReportRows(buildDerived());
+  if (!rows.length) {
+    alert("No procurement data is available to export.");
+    return;
+  }
+  const blob = buildSourcingAuditWorkbook();
+  const link = document.createElement("a");
+  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  link.href = URL.createObjectURL(blob);
+  link.download = `sourcing-money-audit-with-sop-${timestamp}.xlsx`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -7790,6 +9888,7 @@ function renderAll() {
   renderMetricProducts(derived);
   renderFollowups(derived);
   renderPoAvailability(derived);
+  renderReports(derived);
 }
 
 function bindTabs() {
@@ -7894,6 +9993,30 @@ function bindGlobalEvents() {
   document
     .getElementById("exportFullDataBtn")
     .addEventListener("click", exportFullData);
+  document
+    .getElementById("reportKpiGrid")
+    ?.addEventListener("click", handleReportAction);
+  document
+    .getElementById("reportKpiGrid")
+    ?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      handleReportAction(event);
+    });
+  document
+    .getElementById("mechanicalAnalysisTabs")
+    ?.addEventListener("click", (event) => {
+      const tab = event.target.closest("[data-mechanical-tab]");
+      if (!tab) return;
+      state.mechanicalAnalysisTab = tab.dataset.mechanicalTab;
+      renderReports(buildDerived());
+    });
+  document
+    .getElementById("exportProcurementReportBtn")
+    ?.addEventListener("click", exportProcurementReportXlsx);
+  document
+    .getElementById("exportMechanicalAnalysisBtn")
+    ?.addEventListener("click", exportMechanicalAnalysisXlsx);
   document
     .getElementById("importStateInput")
     .addEventListener("change", importLocalState);

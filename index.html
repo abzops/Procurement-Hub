@@ -30,6 +30,7 @@
         <button class="tab" data-tab="vendor-metrics">Vendor Metrics</button>
         <button class="tab" data-tab="follow-ups">Follow-ups</button>
         <button class="tab" data-tab="po-availability">PO Availability</button>
+        <button class="tab" data-tab="reports">Reports</button>
       </nav>
 
       <div class="sidebar-help">
@@ -303,6 +304,55 @@
 
       <section class="tab-panel" id="po-availability">
         <div id="poAvailabilityContent"></div>
+      </section>
+
+      <section class="tab-panel" id="reports">
+        <div class="tab-page-header">
+          <div>
+            <h1>Reports</h1>
+            <p>Export-ready procurement reporting from the full PO line-item dataset.</p>
+          </div>
+        </div>
+
+        <section class="kpi-grid report-kpi-grid" id="reportKpiGrid"></section>
+
+        <article class="panel report-table-panel hidden" id="procurementReportPanel">
+          <div class="panel-header wrap">
+            <div>
+              <h2>Procurement Report</h2>
+              <p class="section-copy" id="procurementReportSummary">All purchase order item and charge lines.</p>
+            </div>
+            <div class="toolbar">
+              <button class="primary-btn" id="exportProcurementReportBtn" type="button">Export XLSX</button>
+            </div>
+          </div>
+          <div class="table-wrap report-table-wrap">
+            <table class="report-table">
+              <thead id="procurementReportHead"></thead>
+              <tbody id="procurementReportBody"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel report-table-panel hidden" id="mechanicalAnalysisPanel">
+          <div class="panel-header wrap">
+            <div>
+              <h2>Mechanical Procurement Analysis</h2>
+              <p class="section-copy" id="mechanicalAnalysisSummary">Mechanical sourcing analysis from current PO data.</p>
+            </div>
+            <div class="toolbar">
+              <button class="primary-btn" id="exportMechanicalAnalysisBtn" type="button">Export Mechanical XLSX</button>
+            </div>
+          </div>
+          <section class="mechanical-dashboard-grid" id="mechanicalDashboardGrid"></section>
+          <div class="report-tab-strip" id="mechanicalAnalysisTabs"></div>
+          <div class="table-wrap report-table-wrap mechanical-table-wrap">
+            <table class="report-table mechanical-report-table">
+              <thead id="mechanicalAnalysisHead"></thead>
+              <tbody id="mechanicalAnalysisBody"></tbody>
+            </table>
+          </div>
+        </article>
       </section>
       </main>
     </div>
