@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   reusableQueue: "sns-reusable-po-queue-v1",
   poMaster: "sns-po-master-v1",
   activeReservations: "sns-active-po-reservations-v1",
+  procurementAudit: "sns-procurement-audit-v1",
 };
 
 let baseRows = Array.isArray(window.STACKNSTOCK_DATA?.rows)
@@ -259,6 +260,208 @@ const MECHANICAL_ANALYSIS_COLUMNS = {
   ],
 };
 
+const PROCUREMENT_AUDIT_TABS = [
+  "Vendor Master",
+  "PO Master",
+  "Line Item Audit",
+  "Vendor Audit",
+  "Invoices",
+  "Payments",
+  "Receipts",
+  "Missing Documents",
+  "Risk Register",
+  "Action Tracker",
+  "KPI Summary",
+];
+
+const AUDIT_SELECT_OPTIONS = {
+  yesNo: ["Yes", "No"],
+  vendorCategory: ["Mechanical", "Electrical", "Electronics", "Fabrication", "Raw Material", "Tools", "Consumables", "Services", "Other"],
+  currency: ["INR", "USD", "EUR", "GBP", "CNY"],
+  poAuditStatus: ["Pending", "In Progress", "Completed"],
+  purchaseType: ["Prototype", "Production", "Consumable", "Tooling"],
+  auditType: ["Routine", "Technical", "Commercial"],
+  itemMaturity: ["Prototype", "Alpha", "Beta", "Production"],
+  vendorType: ["OEM", "Distributor", "Local Manufacturer"],
+  urgency: ["Low", "Medium", "High", "Critical"],
+  technicalValidation: ["Pending", "Yes", "No", "Approved", "Failed"],
+  riskLevel: ["Low", "Medium", "High", "Critical"],
+  gstCheck: ["Pending", "Correct", "Incorrect", "Not Applicable"],
+  inspection: ["Pending", "Passed", "Failed", "Conditional"],
+  documentStatus: ["Missing", "Requested", "Received", "Verified", "Rejected", "Not Required"],
+  riskStatus: ["Open", "Mitigated", "Closed"],
+  actionStatus: ["Open", "In Progress", "Closed"],
+};
+
+const PROCUREMENT_AUDIT_CONFIG = {
+  "Vendor Master": {
+    keyField: "vendorName",
+    source: "vendor",
+    fields: [
+      { key: "vendorName", label: "Vendor Name", readonly: true, required: true },
+      { key: "vendorCategory", label: "Category", options: AUDIT_SELECT_OPTIONS.vendorCategory },
+      { key: "contactPerson", label: "Contact Person 1" },
+      { key: "contactPerson2", label: "Contact Person 2" },
+      { key: "email", label: "Email", type: "email" },
+      { key: "phone", label: "Phone 1" },
+      { key: "phone2", label: "Phone 2" },
+      { key: "currencyCode", label: "Currency", options: AUDIT_SELECT_OPTIONS.currency },
+      { key: "source", label: "Source of Supply" },
+      { key: "gstin", label: "GSTIN" },
+    ],
+  },
+  "PO Master": {
+    keyField: "poNumber",
+    source: "po",
+    fields: [
+      { key: "poNumber", label: "PO Number", readonly: true, required: true },
+      { key: "poDate", label: "PO Date", type: "date", readonly: true },
+      { key: "vendorName", label: "Vendor Name", readonly: true },
+      { key: "purchaseCategory", label: "Category", options: AUDIT_SELECT_OPTIONS.vendorCategory },
+      { key: "poTotal", label: "Total PO Value", type: "money", readonly: true },
+      { key: "gstIncluded", label: "GST Included", options: AUDIT_SELECT_OPTIONS.yesNo },
+      { key: "advancePaid", label: "Advance Paid", type: "number", min: 0, step: "0.01" },
+      { key: "balancePaid", label: "Balance Paid", type: "money", readonly: true },
+      { key: "paymentStatus", label: "Payment Status", readonly: true },
+      { key: "expectedDeliveryDate", label: "Expected Delivery Date", type: "date", readonly: true },
+      { key: "actualDeliveryDate", label: "Actual Delivery Date", type: "date", readonly: true },
+      { key: "deliveryStatus", label: "Delivery Status", readonly: true },
+      { key: "grnAvailable", label: "GRN Available", readonly: true },
+      { key: "invoiceAvailable", label: "Invoice Available", readonly: true },
+      { key: "auditStatus", label: "Audit Status", options: AUDIT_SELECT_OPTIONS.poAuditStatus },
+      { key: "auditNotes", label: "Audit Notes", type: "textarea" },
+    ],
+  },
+  "Line Item Audit": {
+    keyField: "lineId",
+    source: "line",
+    fields: [
+      { key: "lineId", label: "Line ID", readonly: true, hidden: true },
+      { key: "poNumber", label: "PO Number", readonly: true },
+      { key: "vendorName", label: "Vendor Name", readonly: true },
+      { key: "itemName", label: "Item Name / Description", readonly: true },
+      { key: "quantity", label: "Quantity", type: "number", readonly: true },
+      { key: "unitPrice", label: "Unit Price", type: "money", readonly: true },
+      { key: "totalValue", label: "Total Value", type: "money", readonly: true },
+      { key: "purchaseType", label: "Purchase Type", options: AUDIT_SELECT_OPTIONS.purchaseType },
+      { key: "auditType", label: "Audit Type", options: AUDIT_SELECT_OPTIONS.auditType },
+      { key: "itemMaturity", label: "Item Maturity", options: AUDIT_SELECT_OPTIONS.itemMaturity },
+      { key: "vendorType", label: "Vendor Type", options: AUDIT_SELECT_OPTIONS.vendorType },
+      { key: "purchaseUrgency", label: "Purchase Urgency", options: AUDIT_SELECT_OPTIONS.urgency },
+      { key: "quoteCount", label: "Quote Count", type: "number", min: 0, step: "1" },
+      { key: "technicalValidation", label: "Technical Validation", options: AUDIT_SELECT_OPTIONS.technicalValidation },
+      { key: "priceBenchmarkAvailable", label: "Price Benchmark Available", options: AUDIT_SELECT_OPTIONS.yesNo },
+      { key: "benchmarkUnitPrice", label: "Benchmark Unit Price", type: "number", min: 0, step: "0.01" },
+      { key: "backupVendorAvailable", label: "Backup Vendor Available", options: AUDIT_SELECT_OPTIONS.yesNo },
+      { key: "riskLevel", label: "Risk Level", options: AUDIT_SELECT_OPTIONS.riskLevel },
+      { key: "actionRequired", label: "Action Required", type: "textarea" },
+      { key: "priceVariance", label: "Price Variance %", type: "number", step: "0.01" },
+      { key: "deliveryVariance", label: "Delivery Variance Days", type: "number", step: "1" },
+      { key: "qualityVariance", label: "Quality Variance", type: "textarea" },
+    ],
+  },
+  "Vendor Audit": {
+    keyField: "vendorName",
+    source: "vendorAudit",
+    fields: [
+      { key: "vendorName", label: "Vendor Name", readonly: true },
+      { key: "priceCompetitiveness", label: "Price Competitiveness", type: "number", min: 1, max: 10, step: "0.1" },
+      { key: "quality", label: "Quality", type: "number", min: 1, max: 10, step: "0.1" },
+      { key: "deliveryReliability", label: "Delivery Reliability", type: "number", min: 1, max: 10, step: "0.1" },
+      { key: "technicalCapability", label: "Technical Capability", type: "number", min: 1, max: 10, step: "0.1" },
+      { key: "responsiveness", label: "Responsiveness", type: "number", min: 1, max: 10, step: "0.1" },
+      { key: "paymentFlexibility", label: "Payment Flexibility", type: "number", min: 1, max: 10, step: "0.1" },
+      { key: "documentationDiscipline", label: "Documentation Discipline", type: "number", min: 1, max: 10, step: "0.1" },
+      { key: "overallScore", label: "Overall Score", type: "number", readonly: true },
+      { key: "classification", label: "Classification", readonly: true },
+      { key: "notes", label: "Notes", type: "textarea" },
+    ],
+  },
+  Invoices: {
+    collection: "invoices",
+    fields: [
+      { key: "poNumber", label: "PO Number", sourceOptions: "po", required: true },
+      { key: "vendorName", label: "Vendor Name", readonly: true },
+      { key: "invoiceNumber", label: "Invoice Number", required: true },
+      { key: "invoiceDate", label: "Invoice Date", type: "date" },
+      { key: "invoiceAmount", label: "Invoice Amount", type: "number", min: 0, step: "0.01", required: true },
+      { key: "gstCorrect", label: "GST Verification", options: AUDIT_SELECT_OPTIONS.gstCheck },
+      { key: "freightIncluded", label: "Freight Included", options: AUDIT_SELECT_OPTIONS.yesNo },
+      { key: "freightAmount", label: "Freight Amount", type: "number", min: 0, step: "0.01" },
+      { key: "extraCharges", label: "Extra Charges", type: "number", min: 0, step: "0.01" },
+      { key: "evidenceReference", label: "Evidence Reference" },
+      { key: "comments", label: "Comments", type: "textarea" },
+    ],
+  },
+  Payments: {
+    collection: "payments",
+    fields: [
+      { key: "poNumber", label: "PO Number", sourceOptions: "po", required: true },
+      { key: "invoiceId", label: "Invoice", sourceOptions: "invoice" },
+      { key: "paymentDate", label: "Payment Date", type: "date" },
+      { key: "paymentType", label: "Payment Type", options: ["Advance", "Balance", "Final", "Refund", "Other"] },
+      { key: "amount", label: "Amount", type: "number", min: 0, step: "0.01", required: true },
+      { key: "paymentReference", label: "Payment Reference" },
+      { key: "proofAvailable", label: "Proof Available", options: AUDIT_SELECT_OPTIONS.yesNo },
+      { key: "approved", label: "Approved", options: AUDIT_SELECT_OPTIONS.yesNo },
+      { key: "remarks", label: "Remarks", type: "textarea" },
+    ],
+  },
+  Receipts: {
+    collection: "receipts",
+    fields: [
+      { key: "poNumber", label: "PO Number", sourceOptions: "po", required: true },
+      { key: "lineId", label: "PO Line", sourceOptions: "line" },
+      { key: "grnNumber", label: "GRN Number" },
+      { key: "grnDate", label: "GRN / Receipt Date", type: "date" },
+      { key: "receivedQuantity", label: "Received Quantity", type: "number", min: 0, step: "0.001" },
+      { key: "inspectionStatus", label: "Inspection Status", options: AUDIT_SELECT_OPTIONS.inspection },
+      { key: "rejectionQuantity", label: "Rejection Quantity", type: "number", min: 0, step: "0.001" },
+      { key: "deliveryChallan", label: "Delivery Challan" },
+      { key: "testCertificate", label: "Test Certificate" },
+      { key: "warrantyReference", label: "Warranty Reference" },
+      { key: "comments", label: "Comments", type: "textarea" },
+    ],
+  },
+  "Missing Documents": {
+    collection: "documents",
+    fields: [
+      { key: "poNumber", label: "PO Number", sourceOptions: "po" },
+      { key: "vendorName", label: "Vendor Name", readonly: true },
+      { key: "documentType", label: "Document Type", options: ["PO", "Invoice", "GRN", "Delivery Challan", "Test Certificate", "Warranty", "Payment Proof", "Other"], required: true },
+      { key: "status", label: "Status", options: AUDIT_SELECT_OPTIONS.documentStatus },
+      { key: "comments", label: "Comments", type: "textarea" },
+    ],
+  },
+  "Risk Register": {
+    collection: "risks",
+    fields: [
+      { key: "itemPo", label: "Item / PO" },
+      { key: "finding", label: "Finding", required: true },
+      { key: "risk", label: "Risk" },
+      { key: "evidence", label: "Evidence", type: "textarea" },
+      { key: "impact", label: "Impact", type: "textarea" },
+      { key: "action", label: "Recommended Action", type: "textarea" },
+      { key: "owner", label: "Owner" },
+      { key: "priority", label: "Priority", options: AUDIT_SELECT_OPTIONS.riskLevel },
+      { key: "dueDate", label: "Due Date", type: "date" },
+      { key: "status", label: "Status", options: AUDIT_SELECT_OPTIONS.riskStatus },
+    ],
+  },
+  "Action Tracker": {
+    collection: "actions",
+    fields: [
+      { key: "description", label: "Description", type: "textarea", required: true },
+      { key: "owner", label: "Owner" },
+      { key: "priority", label: "Priority", options: AUDIT_SELECT_OPTIONS.riskLevel },
+      { key: "dueDate", label: "Due Date", type: "date" },
+      { key: "status", label: "Status", options: AUDIT_SELECT_OPTIONS.actionStatus },
+      { key: "comments", label: "Comments / Closure Evidence", type: "textarea" },
+    ],
+  },
+  "KPI Summary": { readonly: true, fields: [] },
+};
+
 const METRIC_PRODUCT_COLUMNS = [
   { key: "productName", label: "Product" },
   { key: "vendorCount", label: "Vendors" },
@@ -392,18 +595,42 @@ const FOLLOWUP_RULES = {
   ],
 };
 
+function normalizeProcurementAuditState(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  const objectValue = (key) =>
+    raw[key] && typeof raw[key] === "object" && !Array.isArray(raw[key])
+      ? raw[key]
+      : {};
+  const arrayValue = (key) => (Array.isArray(raw[key]) ? raw[key] : []);
+  return {
+    poMaster: objectValue("poMaster"),
+    lineAudits: objectValue("lineAudits"),
+    vendorAudits: objectValue("vendorAudits"),
+    invoices: arrayValue("invoices"),
+    payments: arrayValue("payments"),
+    receipts: arrayValue("receipts"),
+    documents: arrayValue("documents"),
+    risks: arrayValue("risks"),
+    actions: arrayValue("actions"),
+  };
+}
+
 const state = {
   manualRows: loadJson(STORAGE_KEYS.manualRows, []),
   rowOverrides: loadJson(STORAGE_KEYS.rowOverrides, {}),
   vendorContacts: mergeVendorSeeds(loadJson(STORAGE_KEYS.vendorContacts, {})),
   productVendorMetrics: loadJson(STORAGE_KEYS.productVendorMetrics, {}),
   followups: [],
+  followupLogs: [],
   activityEvents: [],
   deletedVendors: loadJson(STORAGE_KEYS.deletedVendors, []),
   poTokenLog: loadJson(STORAGE_KEYS.poTokenLog, []),
   reusableQueue: loadJson(STORAGE_KEYS.reusableQueue, []),
   poMaster: loadJson(STORAGE_KEYS.poMaster, []),
   activeReservations: loadJson(STORAGE_KEYS.activeReservations, []),
+  procurementAudit: normalizeProcurementAuditState(
+    loadJson(STORAGE_KEYS.procurementAudit, {}),
+  ),
   activeTab: "overview",
   selectedVendor: null,
   selectedMetricProduct: null,
@@ -411,7 +638,10 @@ const state = {
   showMetricVendorForm: false,
   showProcurementReport: false,
   showMechanicalAnalysis: false,
+  showProcurementAudit: false,
   mechanicalAnalysisTab: "Dashboard",
+  procurementAuditTab: "Vendor Master",
+  procurementAuditEditingId: null,
   filters: {
     poSearch: "",
     poVendor: "all",
@@ -537,6 +767,69 @@ function cleanConfigText(value) {
 function safeDate(value) {
   const text = cleanText(value);
   return text || null;
+}
+
+function todayIsoDate() {
+  return dateToIso(todayDateOnly());
+}
+
+function isMissingSupabaseColumnError(error, columns = []) {
+  const message = String(error?.message || error || "").toLowerCase();
+  const optionalColumns = columns.map((column) => column.toLowerCase());
+  return (
+    optionalColumns.some((column) => message.includes(column)) &&
+    (error?.code === "42703" ||
+      error?.code === "PGRST204" ||
+      message.includes("schema cache") ||
+      message.includes("column"))
+  );
+}
+
+function stripOptionalColumns(value, columns = []) {
+  if (Array.isArray(value)) {
+    return value.map((row) => stripOptionalColumns(row, columns));
+  }
+  const copy = { ...(value || {}) };
+  columns.forEach((column) => delete copy[column]);
+  return copy;
+}
+
+async function upsertSupabaseWithOptionalColumns(
+  table,
+  payload,
+  options,
+  optionalColumns = [],
+) {
+  const first = await supabaseClient.from(table).upsert(payload, options);
+  if (!first.error) return first;
+  if (!isMissingSupabaseColumnError(first.error, optionalColumns))
+    throw first.error;
+  const fallbackPayload = stripOptionalColumns(payload, optionalColumns);
+  const second = await supabaseClient
+    .from(table)
+    .upsert(fallbackPayload, options);
+  if (second.error) throw second.error;
+  return second;
+}
+
+async function updateSupabaseEqWithOptionalColumns(
+  table,
+  patch,
+  column,
+  value,
+  optionalColumns = [],
+) {
+  const first = await supabaseClient.from(table).update(patch).eq(column, value);
+  if (!first.error) return first;
+  if (!isMissingSupabaseColumnError(first.error, optionalColumns))
+    throw first.error;
+  const fallbackPatch = stripOptionalColumns(patch, optionalColumns);
+  const second = await supabaseClient
+    .from(table)
+    .update(fallbackPatch)
+    .eq(column, value);
+  if (second.error) throw second.error;
+  return second;
 }
 
 function toNumeric(value) {
@@ -1209,6 +1502,7 @@ async function loadRemoteStateFromSupabase() {
     linesRes,
     metricsRes,
     followupsRes,
+    followupLogsRes,
     activityEventsRes,
   ] = await Promise.all([
     supabaseClient.from("vendors").select("*").order("vendor_name"),
@@ -1228,6 +1522,10 @@ async function loadRemoteStateFromSupabase() {
       .from("po_followups")
       .select("*")
       .order("due_date", { ascending: true }),
+    supabaseClient
+      .from("po_followup_logs")
+      .select("*")
+      .order("created_at", { ascending: false }),
     supabaseClient
       .from("po_activity_events")
       .select("*")
@@ -1249,6 +1547,9 @@ async function loadRemoteStateFromSupabase() {
     );
     return false;
   }
+  if (followupLogsRes.error && !isOptionalSupabaseTableError(followupLogsRes.error)) {
+    console.warn("Follow-up log history could not be loaded", followupLogsRes.error);
+  }
 
   const vendors = vendorsRes.data || [];
   const lines = linesRes.data || [];
@@ -1259,9 +1560,13 @@ async function loadRemoteStateFromSupabase() {
     .map((v) => ({
       vendorName: v.vendor_name,
       source: v.source || "",
+      vendorCategory: v.vendor_category || "",
+      currencyCode: v.currency_code || "INR",
       gstin: v.gstin || "",
       contactPerson: v.contact_person || "",
+      contactPerson2: v.contact_person_2 || "",
       phone: v.phone || "",
+      phone2: v.phone_2 || "",
       email: v.email || "",
       website: v.website || "",
       city: v.city || "",
@@ -1274,6 +1579,7 @@ async function loadRemoteStateFromSupabase() {
     id: line.line_id,
     poDate: line.po_date || "",
     deliveryDate: line.delivery_date || "",
+    deliveredDate: line.delivered_date || "",
     deliveryStatus: line.delivery_status || "",
     poNumber: line.po_number,
     reference: "",
@@ -1331,6 +1637,7 @@ async function loadRemoteStateFromSupabase() {
       po?.material_type || row.materialType || "Unknown",
     );
     row.edd = po?.edd || row.edd || "";
+    row.deliveredDate = po?.delivered_date || row.deliveredDate || "";
     row.vendorEmail = po?.vendor_email || row.vendorEmail || "";
     row.vendorPhone = po?.vendor_phone || row.vendorPhone || "";
     row.delayReason = po?.delay_reason || row.delayReason || "";
@@ -1348,9 +1655,13 @@ async function loadRemoteStateFromSupabase() {
           {
             vendorName: v.vendor_name,
             source: v.source || "",
+            vendorCategory: v.vendor_category || "",
+            currencyCode: v.currency_code || "INR",
             gstin: v.gstin || "",
             contactPerson: v.contact_person || "",
+            contactPerson2: v.contact_person_2 || "",
             phone: v.phone || "",
+            phone2: v.phone_2 || "",
             email: v.email || "",
             website: v.website || "",
             city: v.city || "",
@@ -1383,9 +1694,402 @@ async function loadRemoteStateFromSupabase() {
   state.followups = (followupsRes.data || []).filter(
     (row) => !isAcknowledgementFollowup(row),
   );
+  state.followupLogs = followupLogsRes.error ? [] : followupLogsRes.data || [];
   state.activityEvents = activityEventsRes.data || [];
+  const audit = procurementAuditState();
+  (poRes.data || []).forEach((po) => {
+    const key = cleanText(po.po_number);
+    if (!key) return;
+    const current = audit.poMaster[key] || {};
+    audit.poMaster[key] = {
+      ...current,
+      purchaseCategory: po.purchase_category ?? current.purchaseCategory ?? "",
+      gstIncluded:
+        po.gst_included == null
+          ? current.gstIncluded ?? ""
+          : po.gst_included
+            ? "Yes"
+            : "No",
+      advancePaid: po.advance_paid ?? current.advancePaid ?? "",
+      auditStatus: po.audit_status ?? current.auditStatus ?? "Pending",
+    };
+  });
+  await loadProcurementAuditFromSupabase();
   await loadPoAvailabilityFromSupabase();
   return true;
+}
+
+async function loadProcurementAuditFromSupabase() {
+  if (!useSupabase) return false;
+  const specs = [
+    ["vendorAudits", "procurement_vendor_audits"],
+    ["lineAudits", "po_line_audits"],
+    ["invoices", "po_invoices"],
+    ["payments", "po_payments"],
+    ["receipts", "po_receipts"],
+    ["documents", "procurement_documents"],
+    ["risks", "procurement_risks"],
+    ["actions", "procurement_actions"],
+  ];
+  const results = await Promise.all(
+    specs.map(async ([key, table]) => {
+      const result = await supabaseClient.from(table).select("*");
+      return { key, table, ...result };
+    }),
+  );
+  const available = results.filter((result) => !result.error);
+  if (!available.length) {
+    const unexpected = results.find(
+      (result) => !isOptionalSupabaseTableError(result.error),
+    );
+    if (unexpected)
+      console.warn(
+        "Procurement audit cloud records are unavailable; local records remain active.",
+        unexpected.error,
+      );
+    return false;
+  }
+
+  const audit = procurementAuditState();
+  available.forEach(({ key, data }) => {
+    const rows = data || [];
+    if (!rows.length) return;
+    if (key === "vendorAudits") {
+      audit.vendorAudits = Object.fromEntries(
+        rows.map((row) => [
+          row.vendor_name,
+          {
+            priceCompetitiveness: row.price_competitiveness ?? "",
+            quality: row.quality ?? "",
+            deliveryReliability: row.delivery_reliability ?? "",
+            technicalCapability: row.technical_capability ?? "",
+            responsiveness: row.responsiveness ?? "",
+            paymentFlexibility: row.payment_flexibility ?? "",
+            documentationDiscipline: row.documentation_discipline ?? "",
+            notes: row.notes || "",
+          },
+        ]),
+      );
+      return;
+    }
+    if (key === "lineAudits") {
+      audit.lineAudits = Object.fromEntries(
+        rows.map((row) => [
+          row.line_id,
+          {
+            purchaseType: row.purchase_type || "",
+            auditType: row.audit_type || "",
+            itemMaturity: row.item_maturity || "",
+            vendorType: row.vendor_type || "",
+            purchaseUrgency: row.purchase_urgency || "",
+            quoteCount: row.quote_count ?? "",
+            technicalValidation: row.technical_validation || "",
+            priceBenchmarkAvailable:
+              row.price_benchmark_available == null
+                ? ""
+                : row.price_benchmark_available
+                  ? "Yes"
+                  : "No",
+            benchmarkUnitPrice: row.benchmark_unit_price ?? "",
+            backupVendorAvailable:
+              row.backup_vendor_available == null
+                ? ""
+                : row.backup_vendor_available
+                  ? "Yes"
+                  : "No",
+            riskLevel: row.risk_level || "",
+            actionRequired: row.action_required || "",
+            priceVariance: row.price_variance ?? "",
+            deliveryVariance: row.delivery_variance ?? "",
+            qualityVariance: row.quality_variance || "",
+            notes: row.notes || "",
+          },
+        ]),
+      );
+      return;
+    }
+    const mapped = rows.map((row) => {
+      if (key === "invoices")
+        return {
+          id: row.id,
+          poNumber: row.po_number,
+          vendorName: row.vendor_name || "",
+          invoiceNumber: row.invoice_number,
+          invoiceDate: row.invoice_date || "",
+          invoiceAmount: row.invoice_amount ?? 0,
+          gstCorrect: row.gst_correct || "Pending",
+          freightIncluded: row.freight_included ? "Yes" : "No",
+          freightAmount: row.freight_amount ?? 0,
+          extraCharges: row.extra_charges ?? 0,
+          evidenceReference: row.evidence_reference || "",
+          comments: row.comments || "",
+        };
+      if (key === "payments")
+        return {
+          id: row.id,
+          poNumber: row.po_number,
+          invoiceId: row.invoice_id || "",
+          paymentDate: row.payment_date || "",
+          paymentType: row.payment_type || "",
+          amount: row.amount ?? 0,
+          paymentReference: row.payment_reference || "",
+          proofAvailable: row.proof_available ? "Yes" : "No",
+          approved: row.approved ? "Yes" : "No",
+          remarks: row.remarks || "",
+        };
+      if (key === "receipts")
+        return {
+          id: row.id,
+          poNumber: row.po_number,
+          lineId: row.line_id || "",
+          grnNumber: row.grn_number || "",
+          grnDate: row.grn_date || "",
+          receivedQuantity: row.received_quantity ?? 0,
+          inspectionStatus: row.inspection_status || "Pending",
+          rejectionQuantity: row.rejection_quantity ?? 0,
+          deliveryChallan: row.delivery_challan || "",
+          testCertificate: row.test_certificate || "",
+          warrantyReference: row.warranty_reference || "",
+          comments: row.comments || "",
+        };
+      if (key === "documents")
+        return {
+          id: row.id,
+          poNumber: row.po_number || "",
+          vendorName: row.vendor_name || "",
+          documentType: row.document_type || "",
+          status: row.status || "Missing",
+          comments: row.comments || "",
+        };
+      if (key === "risks")
+        return {
+          id: row.id,
+          itemPo: row.item_po || "",
+          finding: row.finding || "",
+          risk: row.risk || "",
+          evidence: row.evidence || "",
+          impact: row.impact || "",
+          action: row.action || "",
+          owner: row.owner || "",
+          priority: row.priority || "Medium",
+          dueDate: row.due_date || "",
+          status: row.status || "Open",
+        };
+      return {
+        id: row.id,
+        description: row.description || "",
+        owner: row.owner || "",
+        priority: row.priority || "Medium",
+        dueDate: row.due_date || "",
+        status: row.status || "Open",
+        comments: row.comments || "",
+      };
+    });
+    audit[key] = mapped;
+  });
+  localStorage.setItem(
+    STORAGE_KEYS.procurementAudit,
+    JSON.stringify(state.procurementAudit),
+  );
+  return true;
+}
+
+async function syncProcurementAuditToSupabase() {
+  if (!useSupabase) return false;
+  const audit = procurementAuditState();
+  const lineMap = auditLineMap();
+  const payloads = [
+    [
+      "procurement_vendor_audits",
+      Object.entries(audit.vendorAudits).map(([vendorName, row]) => ({
+        vendor_name: vendorName,
+        price_competitiveness: row.priceCompetitiveness || null,
+        quality: row.quality || null,
+        delivery_reliability: row.deliveryReliability || null,
+        technical_capability: row.technicalCapability || null,
+        responsiveness: row.responsiveness || null,
+        payment_flexibility: row.paymentFlexibility || null,
+        documentation_discipline: row.documentationDiscipline || null,
+        notes: row.notes || "",
+        updated_at: new Date().toISOString(),
+      })),
+      "vendor_name",
+    ],
+    [
+      "po_line_audits",
+      Object.entries(audit.lineAudits).map(([lineId, row]) => {
+        const line = lineMap.get(lineId) || {};
+        return {
+          line_id: lineId,
+          po_number: line.poNumber || "",
+          vendor_name: line.vendorName || "",
+          purchase_type: row.purchaseType || null,
+          audit_type: row.auditType || null,
+          item_maturity: row.itemMaturity || null,
+          vendor_type: row.vendorType || null,
+          purchase_urgency: row.purchaseUrgency || null,
+          quote_count: row.quoteCount === "" ? null : number(row.quoteCount),
+          technical_validation: row.technicalValidation || null,
+          price_benchmark_available:
+            row.priceBenchmarkAvailable === ""
+              ? null
+              : normalizeKey(row.priceBenchmarkAvailable) === "YES",
+          benchmark_unit_price:
+            row.benchmarkUnitPrice === "" ? null : number(row.benchmarkUnitPrice),
+          backup_vendor_available:
+            row.backupVendorAvailable === ""
+              ? null
+              : normalizeKey(row.backupVendorAvailable) === "YES",
+          risk_level: row.riskLevel || null,
+          action_required: row.actionRequired || "",
+          price_variance:
+            row.priceVariance === "" ? null : number(row.priceVariance),
+          delivery_variance:
+            row.deliveryVariance === "" ? null : number(row.deliveryVariance),
+          quality_variance: row.qualityVariance || "",
+          notes: row.notes || "",
+          updated_at: new Date().toISOString(),
+        };
+      }),
+      "line_id",
+    ],
+    [
+      "po_invoices",
+      audit.invoices.map((row) => ({
+        id: row.id,
+        po_number: row.poNumber,
+        vendor_name: row.vendorName || "",
+        invoice_number: row.invoiceNumber,
+        invoice_date: safeDate(row.invoiceDate),
+        invoice_amount: toNumeric(row.invoiceAmount) || 0,
+        gst_correct: row.gstCorrect || "Pending",
+        freight_included: normalizeKey(row.freightIncluded) === "YES",
+        freight_amount: toNumeric(row.freightAmount) || 0,
+        extra_charges: toNumeric(row.extraCharges) || 0,
+        evidence_reference: row.evidenceReference || "",
+        comments: row.comments || "",
+        updated_at: new Date().toISOString(),
+      })),
+      "id",
+    ],
+    [
+      "po_payments",
+      audit.payments.map((row) => ({
+        id: row.id,
+        po_number: row.poNumber,
+        invoice_id: row.invoiceId || null,
+        payment_date: safeDate(row.paymentDate),
+        payment_type: row.paymentType || "",
+        amount: toNumeric(row.amount) || 0,
+        payment_reference: row.paymentReference || "",
+        proof_available: normalizeKey(row.proofAvailable) === "YES",
+        approved: normalizeKey(row.approved) === "YES",
+        remarks: row.remarks || "",
+        updated_at: new Date().toISOString(),
+      })),
+      "id",
+    ],
+    [
+      "po_receipts",
+      audit.receipts.map((row) => ({
+        id: row.id,
+        po_number: row.poNumber,
+        line_id: row.lineId || null,
+        grn_number: row.grnNumber || null,
+        grn_date: safeDate(row.grnDate),
+        received_quantity: toNumeric(row.receivedQuantity) || 0,
+        inspection_status: row.inspectionStatus || "Pending",
+        rejection_quantity: toNumeric(row.rejectionQuantity) || 0,
+        delivery_challan: row.deliveryChallan || "",
+        test_certificate: row.testCertificate || "",
+        warranty_reference: row.warrantyReference || "",
+        comments: row.comments || "",
+        updated_at: new Date().toISOString(),
+      })),
+      "id",
+    ],
+    [
+      "procurement_documents",
+      audit.documents.map((row) => ({
+        id: row.id,
+        po_number: row.poNumber || null,
+        vendor_name: row.vendorName || null,
+        document_type: row.documentType,
+        status: row.status || "Missing",
+        comments: row.comments || "",
+        updated_at: new Date().toISOString(),
+      })),
+      "id",
+    ],
+    [
+      "procurement_risks",
+      audit.risks.map((row) => ({
+        id: row.id,
+        item_po: row.itemPo || "",
+        finding: row.finding,
+        risk: row.risk || "",
+        evidence: row.evidence || "",
+        impact: row.impact || "",
+        action: row.action || "",
+        owner: row.owner || "",
+        priority: row.priority || "Medium",
+        due_date: safeDate(row.dueDate),
+        status: row.status || "Open",
+        updated_at: new Date().toISOString(),
+      })),
+      "id",
+    ],
+    [
+      "procurement_actions",
+      audit.actions.map((row) => ({
+        id: row.id,
+        description: row.description,
+        owner: row.owner || "",
+        priority: row.priority || "Medium",
+        due_date: safeDate(row.dueDate),
+        status: row.status || "Open",
+        comments: row.comments || "",
+        updated_at: new Date().toISOString(),
+      })),
+      "id",
+    ],
+  ];
+  try {
+    for (const [table, payload, onConflict] of payloads) {
+      if (!payload.length) continue;
+      const { error } = await supabaseClient
+        .from(table)
+        .upsert(payload, { onConflict });
+      if (error) throw error;
+    }
+    await syncStateToSupabase();
+    return true;
+  } catch (error) {
+    console.warn(
+      "Procurement audit records remain saved locally; cloud sync requires migration 007 and an authenticated Supabase session.",
+      error,
+    );
+    return false;
+  }
+}
+
+const AUDIT_COLLECTION_TABLES = {
+  invoices: "po_invoices",
+  payments: "po_payments",
+  receipts: "po_receipts",
+  documents: "procurement_documents",
+  risks: "procurement_risks",
+  actions: "procurement_actions",
+};
+
+async function deleteProcurementAuditRecordFromSupabase(collection, id) {
+  if (!useSupabase || !AUDIT_COLLECTION_TABLES[collection] || !id) return;
+  const { error } = await supabaseClient
+    .from(AUDIT_COLLECTION_TABLES[collection])
+    .delete()
+    .eq("id", id);
+  if (error)
+    console.warn("Audit record was deleted locally but not from Supabase.", error);
 }
 
 async function syncStateToSupabase() {
@@ -1411,9 +2115,13 @@ async function syncStateToSupabase() {
         return {
           vendor_name: vendorName,
           source: cleanText(contact.source || derivedVendor.source || ""),
+          vendor_category: cleanText(contact.vendorCategory || ""),
+          currency_code: cleanText(contact.currencyCode || "INR"),
           gstin: cleanText(contact.gstin || derivedVendor.gstin || ""),
           contact_person: cleanText(contact.contactPerson || ""),
+          contact_person_2: cleanText(contact.contactPerson2 || ""),
           phone: cleanText(contact.phone || ""),
+          phone_2: cleanText(contact.phone2 || ""),
           email: cleanText(contact.email || ""),
           website: cleanText(contact.website || ""),
           city: cleanText(contact.city || ""),
@@ -1425,13 +2133,16 @@ async function syncStateToSupabase() {
       });
 
     const poPayload = dedupeRecordsByKey(
-      derived.pos.map((po) => ({
+      derived.pos.map((po) => {
+        const auditPo = procurementAuditState().poMaster[cleanText(po.poNumber)] || {};
+        return {
         po_number: po.poNumber,
         po_date: safeDate(po.poDate),
         vendor_name: po.vendorName,
         source: po.source || "",
         gstin: po.gstin || "",
         delivery_date: safeDate(po.deliveryDate),
+        delivered_date: safeDate(po.deliveredDate),
         payment_status: po.paymentStatus || "",
         po_status: po.poStatus || "",
         delivery_status: po.deliveryStatus || "",
@@ -1458,7 +2169,18 @@ async function syncStateToSupabase() {
         ),
         delay_reason: cleanText(po.delayReason || ""),
         edd: safeDate(po.edd),
-      })),
+        purchase_category: cleanText(auditPo.purchaseCategory || ""),
+        currency_code: cleanText(
+          state.vendorContacts[po.vendorName]?.currencyCode || "INR",
+        ),
+        gst_included:
+          auditPo.gstIncluded === ""
+            ? null
+            : normalizeKey(auditPo.gstIncluded) === "YES",
+        advance_paid: toNumeric(auditPo.advancePaid),
+        audit_status: cleanText(auditPo.auditStatus || "Pending"),
+      };
+      }),
       "po_number",
     );
 
@@ -1469,6 +2191,7 @@ async function syncStateToSupabase() {
         vendor_name: line.vendorName,
         po_date: safeDate(line.poDate),
         delivery_date: safeDate(line.deliveryDate),
+        delivered_date: safeDate(line.deliveredDate),
         payment_status: line.paymentStatus || "",
         po_status: line.poStatus || "",
         delivery_status: line.deliveryStatus || "",
@@ -1516,26 +2239,39 @@ async function syncStateToSupabase() {
 
     // Upsert vendors first for FK safety
     if (vendorsPayload.length) {
-      const { error } = await supabaseClient
-        .from("vendors")
-        .upsert(vendorsPayload, { onConflict: "vendor_name" });
-      if (error) throw error;
+      await upsertSupabaseWithOptionalColumns(
+        "vendors",
+        vendorsPayload,
+        { onConflict: "vendor_name" },
+        ["vendor_category", "currency_code", "contact_person_2", "phone_2"],
+      );
     }
 
     // Normal sync is upsert-only. Do not delete existing Supabase rows here; explicit Delete PO handles deletion.
 
     if (poPayload.length) {
-      const { error } = await supabaseClient
-        .from("purchase_orders")
-        .upsert(poPayload, { onConflict: "po_number" });
-      if (error) throw error;
+      await upsertSupabaseWithOptionalColumns(
+        "purchase_orders",
+        poPayload,
+        { onConflict: "po_number" },
+        [
+          "delivered_date",
+          "purchase_category",
+          "currency_code",
+          "gst_included",
+          "advance_paid",
+          "audit_status",
+        ],
+      );
     }
 
     if (linePayload.length) {
-      const { error } = await supabaseClient
-        .from("po_lines")
-        .upsert(linePayload, { onConflict: "line_id" });
-      if (error) throw error;
+      await upsertSupabaseWithOptionalColumns(
+        "po_lines",
+        linePayload,
+        { onConflict: "line_id" },
+        ["delivered_date"],
+      );
     }
 
     if (metricsPayload.length) {
@@ -1642,6 +2378,10 @@ function saveState() {
     STORAGE_KEYS.activeReservations,
     JSON.stringify(state.activeReservations),
   );
+  localStorage.setItem(
+    STORAGE_KEYS.procurementAudit,
+    JSON.stringify(state.procurementAudit),
+  );
   scheduleRemoteSync();
 }
 
@@ -1741,6 +2481,11 @@ function convertZohoPoPayloadToDbPayload(payload) {
   const deliveryDate = cleanText(
     payload.delivery_date || payload.expected_delivery_date,
   );
+  const deliveredDate = cleanText(
+    payload.delivered_date ||
+      payload.actual_delivery_date ||
+      payload.delivery_completed_date,
+  );
   const vendorName = cleanText(payload.vendor_name);
   const source = cleanText(
     payload.source_of_supply || payload.source || payload.destination_of_supply,
@@ -1807,6 +2552,7 @@ function convertZohoPoPayloadToDbPayload(payload) {
       vendor_name: vendorName,
       po_date: poDate,
       delivery_date: deliveryDate || null,
+      delivered_date: deliveredDate || null,
       payment_status: paymentStatus,
       po_status: poStatus,
       delivery_status: deliveryStatus,
@@ -1879,6 +2625,7 @@ function convertZohoPoPayloadToDbPayload(payload) {
         source,
         gstin,
         delivery_date: deliveryDate || null,
+        delivered_date: deliveredDate || null,
         payment_status: paymentStatus,
         po_status: poStatus,
         delivery_status: deliveryStatus,
@@ -1969,6 +2716,9 @@ async function upsertDbPayloadToSupabase(payload) {
       source: cleanText(po.source),
       gstin: cleanText(po.gstin),
       delivery_date: safeDate(po.delivery_date),
+      delivered_date: safeDate(
+        po.delivered_date || po.actual_delivery_date || po.deliveryCompletedDate,
+      ),
       payment_status: normalizePaymentStatus(po.payment_status || "Pending"),
       po_status: normalizePoStatus(po.po_status || "Issued"),
       delivery_status: normalizeDeliveryStatus(po.delivery_status || "Unknown"),
@@ -2013,6 +2763,11 @@ async function upsertDbPayloadToSupabase(payload) {
       vendor_name: cleanText(line.vendor_name),
       po_date: safeDate(line.po_date),
       delivery_date: safeDate(line.delivery_date),
+      delivered_date: safeDate(
+        line.delivered_date ||
+          line.actual_delivery_date ||
+          line.deliveryCompletedDate,
+      ),
       payment_status: normalizePaymentStatus(line.payment_status || "Pending"),
       po_status: normalizePoStatus(line.po_status || "Issued"),
       delivery_status: normalizeDeliveryStatus(
@@ -2046,16 +2801,20 @@ async function upsertDbPayloadToSupabase(payload) {
     if (error) throw error;
   }
   if (poPayload.length) {
-    const { error } = await supabaseClient
-      .from("purchase_orders")
-      .upsert(poPayload, { onConflict: "po_number" });
-    if (error) throw error;
+    await upsertSupabaseWithOptionalColumns(
+      "purchase_orders",
+      poPayload,
+      { onConflict: "po_number" },
+      ["delivered_date"],
+    );
   }
   if (linePayload.length) {
-    const { error } = await supabaseClient
-      .from("po_lines")
-      .upsert(linePayload, { onConflict: "line_id" });
-    if (error) throw error;
+    await upsertSupabaseWithOptionalColumns(
+      "po_lines",
+      linePayload,
+      { onConflict: "line_id" },
+      ["delivered_date"],
+    );
   }
   return {
     vendors: vendorsPayload.length,
@@ -2224,6 +2983,12 @@ function convertDbImportPayloadToLocalRows(payload) {
         id: rowId,
         poDate: cleanText(po.po_date || line.po_date),
         deliveryDate: cleanText(po.delivery_date || line.delivery_date),
+        deliveredDate: cleanText(
+          po.delivered_date ||
+            po.actual_delivery_date ||
+            line.delivered_date ||
+            line.actual_delivery_date,
+        ),
         poNumber,
         vendorName: cleanText(po.vendor_name || line.vendor_name),
         source: cleanText(line.source || po.source),
@@ -2571,6 +3336,7 @@ function materializeRow(row) {
     id: cleanText(row.id) || uid("row"),
     poDate: cleanText(row.poDate),
     deliveryDate: cleanText(row.deliveryDate),
+    deliveredDate: cleanText(row.deliveredDate),
     edd: cleanText(row.edd),
     materialType: normalizeMaterialType(row.materialType),
     vendorEmail: cleanText(row.vendorEmail),
@@ -2659,6 +3425,129 @@ function summarizeDate(items, field) {
     }))
     .sort((a, b) => b.ts - a.ts);
   return dated[0]?.raw || values[0] || "";
+}
+
+function parseMetadata(value) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function dateValueToIso(value) {
+  if (!cleanText(value)) return "";
+  const date = parseDateOnly(value);
+  if (date) return dateToIso(date);
+  const direct = new Date(value);
+  if (Number.isNaN(direct.getTime())) return "";
+  return dateToIso(
+    new Date(direct.getFullYear(), direct.getMonth(), direct.getDate()),
+  );
+}
+
+function earliestIsoDate(values) {
+  return values
+    .map(dateValueToIso)
+    .filter(Boolean)
+    .sort((a, b) => {
+      const ad = parseDateOnly(a)?.getTime() || 0;
+      const bd = parseDateOnly(b)?.getTime() || 0;
+      return ad - bd;
+    })[0] || "";
+}
+
+function deriveDeliveredDateFromHistory(poNumber) {
+  const key = cleanText(poNumber);
+  if (!key) return "";
+  const candidates = [];
+  const addCandidate = (value) => {
+    const date = dateValueToIso(value);
+    if (date) candidates.push(date);
+  };
+
+  (state.activityEvents || [])
+    .filter((event) => cleanText(event.po_number || event.poNumber) === key)
+    .forEach((event) => {
+      const metadata = parseMetadata(event.metadata);
+      const eventType = normalizeKey(event.event_type || event.type);
+      const title = normalizeKey(event.event_title || event.title);
+      const description = normalizeKey(
+        event.event_description || event.description,
+      );
+      const newValue = cleanText(
+        event.new_value ||
+          event.newValue ||
+          metadata.new_value ||
+          metadata.newValue ||
+          metadata.delivery_status ||
+          metadata.deliveryStatus ||
+          metadata.close_reason ||
+          metadata.closeReason,
+      );
+      const isDeliveredEvent =
+        normalizeDeliveryStatus(newValue) === "Delivered" ||
+        eventType.includes("DELIVERY_COMPLETED") ||
+        title.includes("DELIVERED DATE") ||
+        (eventType.includes("DELIVERY") && description.includes("DELIVERED"));
+      if (!isDeliveredEvent) return;
+      addCandidate(
+        metadata.delivered_date ||
+          metadata.deliveredDate ||
+          metadata.actual_delivery_date ||
+          metadata.actualDeliveryDate ||
+          event.created_at ||
+          event.createdAt ||
+          event.date,
+      );
+    });
+
+  (state.followupLogs || [])
+    .filter((row) => cleanText(row.po_number || row.poNumber) === key)
+    .forEach((row) => {
+      const metadata = parseMetadata(row.metadata);
+      const closeReason = cleanText(
+        row.close_reason ||
+          row.closeReason ||
+          metadata.close_reason ||
+          metadata.closeReason,
+      );
+      if (normalizeDeliveryStatus(closeReason) !== "Delivered") return;
+      addCandidate(
+        row.delivered_date ||
+          row.deliveredDate ||
+          metadata.delivered_date ||
+          metadata.deliveredDate ||
+          row.created_at ||
+          row.createdAt,
+      );
+    });
+
+  (state.followups || [])
+    .filter((row) => cleanText(row.po_number || row.poNumber) === key)
+    .forEach((row) => {
+      const closeReason = cleanText(row.close_reason || row.closeReason);
+      if (normalizeDeliveryStatus(closeReason) !== "Delivered") return;
+      addCandidate(
+        row.delivered_date ||
+          row.deliveredDate ||
+          row.completed_at ||
+          row.completedAt ||
+          row.updated_at ||
+          row.updatedAt ||
+          row.created_at ||
+          row.createdAt,
+      );
+    });
+
+  return earliestIsoDate(candidates);
+}
+
+function resolveDeliveredDate(poNumber, savedDate = "") {
+  return deriveDeliveredDateFromHistory(poNumber) || safeDate(savedDate) || "";
 }
 
 function groupedPoItems(items) {
@@ -2839,6 +3728,8 @@ function groupedPOs(rows) {
     ]
       .join(" ")
       .toLowerCase();
+    const savedDeliveredDate =
+      summarizeDate(items, "deliveredDate") || first.deliveredDate || "";
 
     return {
       poKey: poNumber,
@@ -2861,6 +3752,7 @@ function groupedPOs(rows) {
       delayReason: first.delayReason || "",
       deliveryDate:
         summarizeDate(items, "deliveryDate") || first.deliveryDate || "",
+      deliveredDate: resolveDeliveredDate(poNumber, savedDeliveredDate),
       paymentStatus: summarizeStatus(items, "paymentStatus"),
       poStatus: summarizeStatus(items, "poStatus"),
       deliveryStatus: summarizeStatus(items, "deliveryStatus"),
@@ -4228,6 +5120,10 @@ function closeCompleteFollowupModal() {
 function applyFollowupCompletionLocally(followupRow, completion) {
   const id = cleanText(followupRow.id);
   const poNumber = cleanText(followupRow.po_number || completion.poNumber);
+  const closesAsDelivered =
+    normalizeDeliveryStatus(completion.closeReason) === "Delivered";
+  const deliveredDate =
+    completion.deliveredDate || (closesAsDelivered ? todayIsoDate() : "");
   const updated = {
     ...followupRow,
     status: "Completed",
@@ -4253,6 +5149,10 @@ function applyFollowupCompletionLocally(followupRow, completion) {
     if (!row || cleanText(row.poNumber) !== poNumber) return row;
     if (completion.edd) row.edd = completion.edd;
     if (completion.delayReason) row.delayReason = completion.delayReason;
+    if (closesAsDelivered) {
+      row.deliveryStatus = "Delivered";
+      row.deliveredDate = row.deliveredDate || deliveredDate;
+    }
     return row;
   };
 
@@ -4266,8 +5166,34 @@ function applyFollowupCompletionLocally(followupRow, completion) {
       ...(completion.delayReason
         ? { delayReason: completion.delayReason }
         : {}),
+      ...(closesAsDelivered
+        ? {
+            deliveryStatus: "Delivered",
+            deliveredDate:
+              state.rowOverrides[row.id]?.deliveredDate ||
+              row.deliveredDate ||
+              deliveredDate,
+          }
+        : {}),
     };
   });
+  if (closesAsDelivered) {
+    state.activityEvents.push({
+      po_number: poNumber,
+      event_type: "delivery_status_changed",
+      event_title: "Delivery Status Changed",
+      event_description: "Delivery status changed to Delivered from follow-up completion.",
+      old_value: "",
+      new_value: "Delivered",
+      actor: completion.doneBy || "Procurement Hub",
+      source: "Follow-ups",
+      metadata: {
+        delivered_date: deliveredDate,
+        close_reason: completion.closeReason,
+      },
+      created_at: completion.completedAt || new Date().toISOString(),
+    });
+  }
   saveState();
 }
 
@@ -4331,6 +5257,15 @@ async function completeFollowup(event) {
   const delayReason = cleanText(form.elements.delayReason.value);
   const nextFollowupDate = safeDate(form.elements.nextFollowupDate.value);
   const closeReason = cleanText(form.elements.closeReason?.value || "");
+  const closesAsDelivered =
+    normalizeDeliveryStatus(closeReason) === "Delivered";
+  const deliveredDate = closesAsDelivered
+    ? safeDate(
+        context.po?.deliveredDate ||
+          card.delivered_date ||
+          card.deliveredDate,
+      ) || todayIsoDate()
+    : "";
   const notes = cleanText(form.elements.notes.value);
 
   if (!doneBy) {
@@ -4369,6 +5304,7 @@ async function completeFollowup(event) {
       delayReason,
       nextFollowupDate,
       closeReason,
+      deliveredDate,
       notes,
       completedAt,
       callStatus,
@@ -4409,15 +5345,33 @@ async function completeFollowup(event) {
         .insert(logPayload);
       if (logError) throw logError;
 
-      if (edd || delayReason) {
+      if (edd || delayReason || closesAsDelivered) {
         const poPatch = {};
         if (edd) poPatch.edd = edd;
         if (delayReason) poPatch.delay_reason = delayReason;
-        const { error: poError } = await supabaseClient
-          .from("purchase_orders")
-          .update(poPatch)
-          .eq("po_number", poNumber);
-        if (poError) throw poError;
+        if (closesAsDelivered) {
+          poPatch.delivery_status = "Delivered";
+          poPatch.delivered_date = deliveredDate;
+        }
+        await updateSupabaseEqWithOptionalColumns(
+          "purchase_orders",
+          poPatch,
+          "po_number",
+          poNumber,
+          ["delivered_date"],
+        );
+        if (closesAsDelivered) {
+          await updateSupabaseEqWithOptionalColumns(
+            "po_lines",
+            {
+              delivery_status: "Delivered",
+              delivered_date: deliveredDate,
+            },
+            "po_number",
+            poNumber,
+            ["delivered_date"],
+          );
+        }
       }
 
       await insertPoActivityEvent({
@@ -4435,6 +5389,7 @@ async function completeFollowup(event) {
           delay_reason: delayReason,
           next_followup_date: nextFollowupDate,
           close_reason: closeReason,
+          delivered_date: deliveredDate || null,
         },
       });
 
@@ -5218,8 +6173,8 @@ function paymentSummaryHtml({ totalSpent, totalValue, totalOutstanding }) {
         <strong>${escapeHtml(compactMoney(totalValue))}</strong>
       </div>
       <div class="payment-breakdown-row muted">
-        <span><i style="background:rgba(255,255,255,.32)"></i>Remaining balance</span>
-        <strong>${escapeHtml(compactMoney(totalOutstanding))} (${escapeHtml(formatNumber(outstandingPercent))}%)</strong>
+        <span><i style="background:rgba(255,255,255,.32)"></i>Balance due</span>
+        <strong>${escapeHtml(compactMoney(totalOutstanding))}<small>${escapeHtml(formatNumber(outstandingPercent))}%</small></strong>
       </div>
     </div>
   `;
@@ -5333,18 +6288,22 @@ function renderCommandKpis({ pos }) {
   ];
   document.getElementById("kpiGrid").innerHTML = cards
     .map(
-      (card) => `
+      (card) => {
+        const valueText = String(card.value || "");
+        const valueClass = valueText.length > 7 ? " kpi-value-compact" : "";
+        return `
     <article class="kpi-card kpi-${escapeHtml(card.tone)}">
       <div class="kpi-icon">${kpiIconSvg(card.icon)}</div>
       <div class="kpi-content">
         <div class="kpi-label">
-          <span>${escapeHtml(card.label)}</span>
+          <span title="${escapeHtml(card.label)}">${escapeHtml(card.label)}</span>
         </div>
-        <div class="kpi-value">${escapeHtml(card.value)}</div>
+        <div class="kpi-value${valueClass}">${escapeHtml(card.value)}</div>
         <div class="kpi-note">${escapeHtml(card.note)}</div>
       </div>
     </article>
-  `,
+  `;
+      },
     )
     .join("");
 }
@@ -5485,7 +6444,7 @@ function renderRecentActivity(pos) {
 
   document.getElementById("recentActivity").innerHTML = activities.length
     ? activities
-        .slice(0, 5)
+        .slice(0, 4)
         .map(
           (activity) => `
         <div class="activity-card">
@@ -5794,11 +6753,27 @@ function buildPoStatusTimeline(po) {
     });
   }
 
+  if (po.deliveredDate) {
+    addEvent({
+      date: po.deliveredDate,
+      type: "delivery_completed",
+      title: "Delivered Date",
+      description: `Material delivered on ${formatDate(po.deliveredDate)}`,
+      source: "Purchase Orders",
+    });
+  }
+
+  const deliveryStatusDescription =
+    `${displayDeliveryStatus(po)}` +
+    `${po.deliveryDate ? ` - Expected: ${formatDate(po.deliveryDate)}` : ""}` +
+    `${po.deliveredDate ? ` - Delivered: ${formatDate(po.deliveredDate)}` : ""}`;
+
   addEvent({
-    date: po.deliveryDate || po.poDate,
+    date: po.deliveredDate || po.deliveryDate || po.poDate,
     type: "delivery_status",
     title: "Current Delivery Status",
     description: `${displayDeliveryStatus(po)}${po.deliveryDate ? ` • Delivery date: ${formatDate(po.deliveryDate)}` : ""}`,
+    description: deliveryStatusDescription,
     source: "Purchase Orders",
   });
 
@@ -5921,6 +6896,23 @@ function updatePoSortHeaders() {
     const indicator = button.querySelector("span");
     if (indicator) indicator.textContent = isActive ? (current.dir === "asc" ? "^" : "v") : "-";
   });
+}
+
+function renderPoDeliveryDates(po) {
+  const expectedText = formatDate(po.deliveryDate);
+  const deliveredText = po.deliveredDate ? formatDate(po.deliveredDate) : "Not set";
+  const deliveredLine =
+    displayDeliveryStatus(po) === "Delivered"
+      ? `<div class="small-text"><strong>Delivered</strong>: ${escapeHtml(deliveredText)}</div>`
+      : "";
+  const eddLine = isPoDelayed(po)
+    ? `<div class="small-text"><strong>EDD</strong> <span class="info-icon" title="Revised Estimated Delivery Date">i</span>: ${po.edd ? formatDate(po.edd) : "Not set"}</div>`
+    : "";
+  return `
+    <div class="small-text"><strong>Expected</strong>: ${escapeHtml(expectedText)}</div>
+    ${deliveredLine}
+    ${eddLine}
+  `;
 }
 
 function renderPurchaseOrders({ pos }) {
@@ -6068,8 +7060,7 @@ function renderPurchaseOrders({ pos }) {
       <div class="metric-block">
         <div class="metric-label">Delivery</div>
         <div class="badge ${displayDeliveryBadgeClass(po)}">${escapeHtml(displayDeliveryStatus(po))}</div>
-        <div class="small-text">${formatDate(po.deliveryDate)}</div>
-        ${isPoDelayed(po) ? `<div class="small-text"><strong>EDD</strong> <span class="info-icon" title="Revised Estimated Delivery Date">i</span>: ${po.edd ? formatDate(po.edd) : "Not set"}</div>` : ""}
+        ${renderPoDeliveryDates(po)}
       </div>
       <div class="action-stack">
         <button class="ghost-btn small-btn" data-action="view-products" data-po="${escapeHtml(po.poKey)}">Products</button>
@@ -6197,16 +7188,36 @@ function renderVendorForm(vendors) {
       <input class="control-input" name="source" value="${escapeHtml(contact.source || vendor.source || "")}" />
     </label>
     <label class="field">
+      <span>Category</span>
+      <select class="control-input" name="vendorCategory">
+        ${AUDIT_SELECT_OPTIONS.vendorCategory.map((value) => `<option${value === (contact.vendorCategory || "") ? " selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+      </select>
+    </label>
+    <label class="field">
+      <span>Currency</span>
+      <select class="control-input" name="currencyCode">
+        ${AUDIT_SELECT_OPTIONS.currency.map((value) => `<option${value === (contact.currencyCode || "INR") ? " selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+      </select>
+    </label>
+    <label class="field">
       <span>GSTIN</span>
       <input class="control-input" name="gstin" value="${escapeHtml(contact.gstin || vendor.gstin || "")}" />
     </label>
     <label class="field">
-      <span>Contact Person</span>
+      <span>Contact Person 1</span>
       <input class="control-input" name="contactPerson" value="${escapeHtml(contact.contactPerson || "")}" />
     </label>
     <label class="field">
-      <span>Phone</span>
+      <span>Contact Person 2</span>
+      <input class="control-input" name="contactPerson2" value="${escapeHtml(contact.contactPerson2 || "")}" />
+    </label>
+    <label class="field">
+      <span>Phone 1</span>
       <input class="control-input" name="phone" value="${escapeHtml(contact.phone || "")}" />
+    </label>
+    <label class="field">
+      <span>Phone 2</span>
+      <input class="control-input" name="phone2" value="${escapeHtml(contact.phone2 || "")}" />
     </label>
     <label class="field">
       <span>Email</span>
@@ -6499,6 +7510,20 @@ function createLineItemCard(values = {}) {
   return wrapper;
 }
 
+function syncDeliveredDateField({ stampIfEmpty = false } = {}) {
+  const form = document.getElementById("poForm");
+  const field = document.getElementById("deliveredDateField");
+  const input = form?.elements?.deliveredDate;
+  const statusInput = form?.elements?.deliveryStatus;
+  if (!field || !input || !statusInput) return;
+
+  const isDelivered =
+    normalizeDeliveryStatus(statusInput.value) === "Delivered";
+  field.classList.toggle("hidden", !isDelivered);
+  if (isDelivered && stampIfEmpty && !input.value) input.value = todayIsoDate();
+  if (!isDelivered) input.value = "";
+}
+
 function openPoModal(po = null, options = {}) {
   state.editingPoKey = po?.poKey || null;
   const modal = document.getElementById("poModalBackdrop");
@@ -6523,6 +7548,8 @@ function openPoModal(po = null, options = {}) {
       );
     if (form.elements.edd) form.elements.edd.value = po.edd || "";
     form.elements.deliveryDate.value = po.deliveryDate || "";
+    if (form.elements.deliveredDate)
+      form.elements.deliveredDate.value = po.deliveredDate || "";
     const discountTypeInput = document.getElementById("summaryDiscountType");
     const discountValueInput = document.getElementById("summaryDiscountInput");
     const adjustmentInput = document.getElementById("summaryAdjustmentInput");
@@ -6581,6 +7608,7 @@ function openPoModal(po = null, options = {}) {
     if (form.elements.materialType)
       form.elements.materialType.value = "Unknown";
     if (form.elements.edd) form.elements.edd.value = "";
+    if (form.elements.deliveredDate) form.elements.deliveredDate.value = "";
     if (options.poNumber) form.elements.poNumber.value = options.poNumber;
     linesMount.appendChild(
       createLineItemCard({ quantityOrdered: 1, itemTaxPercent: 18 }),
@@ -6588,6 +7616,7 @@ function openPoModal(po = null, options = {}) {
   }
   const eddField = document.getElementById("eddField");
   if (eddField) eddField.classList.toggle("hidden", !(po && isPoDelayed(po)));
+  syncDeliveredDateField();
   refreshLineIndexes();
   recalcPoSummary();
   modal.classList.remove("hidden");
@@ -6699,6 +7728,16 @@ function collectPoFormPayload(existingPo = null) {
   const deliveryStatus = normalizeDeliveryStatus(
     form.elements.deliveryStatus.value,
   );
+  const previousDeliveryStatus = normalizeDeliveryStatus(
+    existingPo?.deliveryStatus,
+  );
+  const deliveredDateInput = safeDate(form.elements.deliveredDate?.value);
+  const deliveredDate =
+    deliveryStatus === "Delivered"
+      ? deliveredDateInput ||
+        safeDate(existingPo?.deliveredDate) ||
+        (previousDeliveryStatus !== "Delivered" ? todayIsoDate() : "")
+      : "";
   const terms = form.elements.terms.value || "";
   const lineCards = Array.from(document.querySelectorAll(".line-item-card"));
   const rawLines = lineCards
@@ -6756,6 +7795,7 @@ function collectPoFormPayload(existingPo = null) {
       id: base?.id || uid("manual"),
       poDate,
       deliveryDate,
+      deliveredDate,
       edd,
       materialType,
       deliveryStatus,
@@ -6802,6 +7842,44 @@ function collectPoFormPayload(existingPo = null) {
     materialType,
     edd,
   };
+}
+
+function recordDeliveryStatusChange(existingPo, payload) {
+  if (!payload) return;
+  const nextRow = payload.updatedRows?.[0] || {};
+  const previousStatus = normalizeDeliveryStatus(existingPo?.deliveryStatus);
+  const nextStatus = normalizeDeliveryStatus(nextRow.deliveryStatus);
+  if (previousStatus === nextStatus) return;
+  if (!existingPo && nextStatus === "Unknown") return;
+
+  const deliveredDate =
+    nextStatus === "Delivered"
+      ? safeDate(nextRow.deliveredDate) || todayIsoDate()
+      : "";
+  const event = {
+    po_number: payload.poNumber,
+    event_type: "delivery_status_changed",
+    event_title: "Delivery Status Changed",
+    event_description: `Delivery status changed from ${previousStatus || "Unknown"} to ${nextStatus || "Unknown"}.`,
+    old_value: previousStatus || "Unknown",
+    new_value: nextStatus || "Unknown",
+    actor: "Procurement Hub",
+    source: "Purchase Orders",
+    metadata: {
+      delivered_date: deliveredDate || null,
+    },
+  };
+
+  state.activityEvents.push({
+    ...event,
+    created_at: new Date().toISOString(),
+  });
+
+  if (useSupabase) {
+    insertPoActivityEvent(event).catch((error) => {
+      console.warn("Delivery status event could not be saved", error);
+    });
+  }
 }
 
 function applyPoChanges(existingPo, payload) {
@@ -6851,6 +7929,7 @@ function applyPoChanges(existingPo, payload) {
     };
   }
 
+  recordDeliveryStatusChange(existingPo, payload);
   markPoNumberSubmitted(payload.poNumber);
   saveState();
   closePoModal();
@@ -6943,7 +8022,7 @@ function openProductDetailModal(poKey) {
       <div class="detail-card"><div class="k">Amount Paid</div><div class="v">${money(po.amountPaid || 0)}</div></div>
       <div class="detail-card"><div class="k">Balance Due</div><div class="v">${money(po.balanceDue || 0)}</div></div>
       <div class="detail-card"><div class="k">Payment</div><div class="v">${renderPaymentProgress(po)}</div></div>
-      <div class="detail-card"><div class="k">Delivery</div><div class="v"><span class="badge ${displayDeliveryBadgeClass(po)}">${escapeHtml(displayDeliveryStatus(po))}</span> <span class="small-text">${formatDate(po.deliveryDate)}</span></div></div>
+      <div class="detail-card"><div class="k">Delivery</div><div class="v"><span class="badge ${displayDeliveryBadgeClass(po)}">${escapeHtml(displayDeliveryStatus(po))}</span>${renderPoDeliveryDates(po)}</div></div>
     </div>
 
     ${
@@ -7066,6 +8145,7 @@ function exportLocalState() {
     reusableQueue: state.reusableQueue,
     poMaster: state.poMaster,
     activeReservations: state.activeReservations,
+    procurementAudit: state.procurementAudit,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: "application/json",
@@ -7102,6 +8182,7 @@ function exportFullData() {
       reusableQueue: state.reusableQueue,
       poMaster: state.poMaster,
       activeReservations: state.activeReservations,
+      procurementAudit: state.procurementAudit,
     },
     mergedView: {
       rows: allRows(),
@@ -7727,6 +8808,695 @@ function renderMechanicalAnalysis(analysis) {
   renderMechanicalAnalysisTable(analysis);
 }
 
+function procurementAuditState() {
+  state.procurementAudit = normalizeProcurementAuditState(
+    state.procurementAudit,
+  );
+  return state.procurementAudit;
+}
+
+function auditPoMap(derived = buildDerived()) {
+  return new Map(
+    (derived.pos || []).map((po) => [cleanText(po.poNumber), po]),
+  );
+}
+
+function auditLineMap() {
+  return new Map(
+    allRows()
+      .filter((line) => inferLineType(line.itemDesc, line.lineType) !== "charge")
+      .map((line) => [cleanText(line.id), line]),
+  );
+}
+
+function auditVendorScore(record = {}) {
+  const weights = {
+    priceCompetitiveness: 0.2,
+    quality: 0.2,
+    deliveryReliability: 0.2,
+    technicalCapability: 0.15,
+    responsiveness: 0.1,
+    paymentFlexibility: 0.05,
+    documentationDiscipline: 0.1,
+  };
+  let weighted = 0;
+  let usedWeight = 0;
+  Object.entries(weights).forEach(([key, weight]) => {
+    const score = Number(record[key]);
+    if (!Number.isFinite(score) || score <= 0) return;
+    weighted += score * weight;
+    usedWeight += weight;
+  });
+  const overallScore = usedWeight ? Number((weighted / usedWeight).toFixed(2)) : "";
+  let classification = "Not Assessed";
+  if (overallScore !== "") {
+    if (overallScore > 8) classification = "Preferred";
+    else if (overallScore >= 6) classification = "Approved";
+    else if (overallScore >= 4) classification = "Conditional";
+    else classification = "Avoid";
+  }
+  return { overallScore, classification };
+}
+
+function buildProcurementAuditRows(tab, derived = buildDerived()) {
+  const audit = procurementAuditState();
+  const poMap = auditPoMap(derived);
+  const lineMap = auditLineMap();
+  const poVendor = (poNumber) =>
+    cleanText(poMap.get(cleanText(poNumber))?.vendorName || "");
+  const invoicesByPo = new Map();
+  const paymentsByPo = new Map();
+  const receiptsByPo = new Map();
+  audit.invoices.forEach((row) => {
+    const key = cleanText(row.poNumber);
+    if (!invoicesByPo.has(key)) invoicesByPo.set(key, []);
+    invoicesByPo.get(key).push(row);
+  });
+  audit.payments.forEach((row) => {
+    const key = cleanText(row.poNumber);
+    if (!paymentsByPo.has(key)) paymentsByPo.set(key, []);
+    paymentsByPo.get(key).push(row);
+  });
+  audit.receipts.forEach((row) => {
+    const key = cleanText(row.poNumber);
+    if (!receiptsByPo.has(key)) receiptsByPo.set(key, []);
+    receiptsByPo.get(key).push(row);
+  });
+
+  if (tab === "Vendor Master") {
+    const names = new Set([
+      ...Object.keys(state.vendorContacts || {}),
+      ...(derived.vendors || []).map((row) => cleanText(row.vendorName)),
+    ]);
+    return [...names]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+      .map((vendorName) => {
+        const contact = state.vendorContacts[vendorName] || {};
+        const derivedVendor =
+          (derived.vendors || []).find(
+            (row) => normalizeKey(row.vendorName) === normalizeKey(vendorName),
+          ) || {};
+        return {
+          __id: vendorName,
+          vendorName,
+          vendorCategory: contact.vendorCategory || "",
+          contactPerson: contact.contactPerson || "",
+          contactPerson2: contact.contactPerson2 || "",
+          email: contact.email || "",
+          phone: contact.phone || "",
+          phone2: contact.phone2 || "",
+          currencyCode: contact.currencyCode || "INR",
+          source: contact.source || derivedVendor.source || "",
+          gstin: contact.gstin || derivedVendor.gstin || "",
+        };
+      });
+  }
+
+  if (tab === "PO Master") {
+    return (derived.pos || [])
+      .slice()
+      .sort((a, b) => comparePoNumbers(a.poNumber, b.poNumber))
+      .map((po) => {
+        const saved = audit.poMaster[cleanText(po.poNumber)] || {};
+        const payments = paymentsByPo.get(cleanText(po.poNumber)) || [];
+        const advancePaid = payments
+          .filter((row) => normalizeKey(row.paymentType) === "ADVANCE")
+          .reduce((sum, row) => sum + number(row.amount), 0);
+        const balancePaid = payments
+          .filter((row) => normalizeKey(row.paymentType) !== "ADVANCE")
+          .reduce((sum, row) => sum + number(row.amount), 0);
+        const receipts = receiptsByPo.get(cleanText(po.poNumber)) || [];
+        return {
+          __id: po.poNumber,
+          poNumber: po.poNumber,
+          poDate: po.poDate || "",
+          vendorName: po.vendorName || "",
+          purchaseCategory:
+            saved.purchaseCategory ||
+            state.vendorContacts[po.vendorName]?.vendorCategory ||
+            "",
+          poTotal: number(po.poTotal),
+          gstIncluded: saved.gstIncluded || "",
+          advancePaid:
+            saved.advancePaid === "" || saved.advancePaid == null
+              ? advancePaid
+              : number(saved.advancePaid),
+          balancePaid,
+          paymentStatus: po.paymentStatus || "Pending",
+          expectedDeliveryDate: po.deliveryDate || "",
+          actualDeliveryDate: po.deliveredDate || "",
+          deliveryStatus: displayDeliveryStatus(po),
+          grnAvailable: receipts.some((row) => cleanText(row.grnNumber))
+            ? "Yes"
+            : "No",
+          invoiceAvailable: (invoicesByPo.get(cleanText(po.poNumber)) || [])
+            .some((row) => cleanText(row.invoiceNumber))
+            ? "Yes"
+            : "No",
+          auditStatus: saved.auditStatus || "Pending",
+          auditNotes: saved.auditNotes || "",
+        };
+      });
+  }
+
+  if (tab === "Line Item Audit") {
+    return [...lineMap.values()]
+      .sort((a, b) => {
+        const poCompare = comparePoNumbers(a.poNumber, b.poNumber);
+        return poCompare || cleanText(a.itemDesc).localeCompare(cleanText(b.itemDesc));
+      })
+      .map((line) => {
+        const saved = audit.lineAudits[cleanText(line.id)] || {};
+        const benchmark = number(saved.benchmarkUnitPrice);
+        const actual = number(line.itemPrice);
+        const priceVariance =
+          saved.priceVariance !== "" && saved.priceVariance != null
+            ? number(saved.priceVariance)
+            : benchmark > 0
+              ? Number((((actual - benchmark) / benchmark) * 100).toFixed(2))
+              : "";
+        return {
+          __id: line.id,
+          lineId: line.id,
+          poNumber: line.poNumber || "",
+          vendorName: line.vendorName || poVendor(line.poNumber),
+          itemName: line.itemDesc || "",
+          quantity: number(line.quantityOrdered),
+          unitPrice: actual,
+          totalValue: number(line.itemTotal) || actual * number(line.quantityOrdered),
+          purchaseType: saved.purchaseType || "",
+          auditType: saved.auditType || "",
+          itemMaturity: saved.itemMaturity || "",
+          vendorType: saved.vendorType || "",
+          purchaseUrgency: saved.purchaseUrgency || "",
+          quoteCount: saved.quoteCount ?? "",
+          technicalValidation: saved.technicalValidation || "Pending",
+          priceBenchmarkAvailable: saved.priceBenchmarkAvailable || "",
+          benchmarkUnitPrice: saved.benchmarkUnitPrice ?? "",
+          backupVendorAvailable: saved.backupVendorAvailable || "",
+          riskLevel: saved.riskLevel || "",
+          actionRequired: saved.actionRequired || "",
+          priceVariance,
+          deliveryVariance: saved.deliveryVariance ?? "",
+          qualityVariance: saved.qualityVariance || "",
+        };
+      });
+  }
+
+  if (tab === "Vendor Audit") {
+    return buildProcurementAuditRows("Vendor Master", derived).map((vendor) => {
+      const saved = audit.vendorAudits[vendor.vendorName] || {};
+      return {
+        __id: vendor.vendorName,
+        vendorName: vendor.vendorName,
+        ...saved,
+        ...auditVendorScore(saved),
+      };
+    });
+  }
+
+  if (tab === "KPI Summary") {
+    return buildProcurementAuditKpis(derived).map((row, index) => ({
+      __id: `kpi-${index}`,
+      metric: row.metric,
+      value: row.value,
+      definition: row.definition,
+    }));
+  }
+
+  const collection = PROCUREMENT_AUDIT_CONFIG[tab]?.collection;
+  const records = collection ? audit[collection] || [] : [];
+  return records.map((record) => ({
+    ...record,
+    __id: record.id,
+    vendorName:
+      record.vendorName ||
+      (record.poNumber ? poVendor(record.poNumber) : ""),
+  }));
+}
+
+function buildProcurementAuditKpis(derived = buildDerived()) {
+  const audit = procurementAuditState();
+  const poRows = buildProcurementAuditRows("PO Master", derived);
+  const lineRows = buildProcurementAuditRows("Line Item Audit", derived);
+  const vendorRows = buildProcurementAuditRows("Vendor Audit", derived);
+  const paidTotal = audit.payments.reduce(
+    (sum, row) => sum + Math.max(0, number(row.amount)),
+    0,
+  );
+  const pendingPayment = poRows.reduce(
+    (sum, row) =>
+      sum +
+      Math.max(
+        0,
+        number(row.poTotal) - number(row.advancePaid) - number(row.balancePaid),
+      ),
+    0,
+  );
+  const deliveredWithDates = poRows.filter(
+    (row) =>
+      normalizeKey(row.deliveryStatus) === "DELIVERED" &&
+      parseDateOnly(row.expectedDeliveryDate) &&
+      parseDateOnly(row.actualDeliveryDate),
+  );
+  const onTimeCount = deliveredWithDates.filter(
+    (row) =>
+      parseDateOnly(row.actualDeliveryDate) <=
+      parseDateOnly(row.expectedDeliveryDate),
+  ).length;
+  const leadTimes = deliveredWithDates
+    .map((row) =>
+      dateDiffDays(parseDateOnly(row.poDate), parseDateOnly(row.actualDeliveryDate)),
+    )
+    .filter((value) => Number.isFinite(value) && value >= 0);
+  const inspected = audit.receipts.filter((row) =>
+    ["PASSED", "FAILED", "CONDITIONAL"].includes(
+      normalizeKey(row.inspectionStatus),
+    ),
+  );
+  const compliantLines = lineRows.filter(
+    (row) =>
+      number(row.quoteCount) >= 2 ||
+      normalizeKey(row.actionRequired).includes("APPROVED EXCEPTION"),
+  ).length;
+  const assessedVendors = vendorRows.filter(
+    (row) => row.overallScore !== "" && row.overallScore != null,
+  );
+  return [
+    { metric: "Total Spend", value: money(paidTotal), definition: "Sum of recorded payment transactions." },
+    { metric: "Pending Payment", value: money(pendingPayment), definition: "PO value less recorded advance and balance payments." },
+    { metric: "Active Vendors", value: formatNumber(buildProcurementAuditRows("Vendor Master", derived).length), definition: "Vendors currently present in Vendor Master." },
+    { metric: "On-Time Delivery", value: deliveredWithDates.length ? `${Math.round((onTimeCount / deliveredWithDates.length) * 100)}%` : "Not Captured", definition: "Actual delivery on or before expected delivery, using delivered POs with both dates." },
+    { metric: "Average Lead Time", value: leadTimes.length ? `${(leadTimes.reduce((sum, value) => sum + value, 0) / leadTimes.length).toFixed(1)} days` : "Not Captured", definition: "Actual delivery date minus PO date." },
+    { metric: "Vendor Score", value: assessedVendors.length ? (assessedVendors.reduce((sum, row) => sum + number(row.overallScore), 0) / assessedVendors.length).toFixed(2) : "Not Assessed", definition: "Weighted average of completed 1-10 vendor assessments." },
+    { metric: "RFQ Compliance", value: lineRows.length ? `${Math.round((compliantLines / lineRows.length) * 100)}%` : "Not Captured", definition: "Lines with two or more quotes or an approved exception." },
+    { metric: "First-Pass Acceptance", value: inspected.length ? `${Math.round((inspected.filter((row) => normalizeKey(row.inspectionStatus) === "PASSED").length / inspected.length) * 100)}%` : "Not Captured", definition: "Recorded inspections passed at first receipt." },
+    { metric: "Open Risks", value: formatNumber(audit.risks.filter((row) => normalizeKey(row.status) !== "CLOSED").length), definition: "Persistent risks not closed." },
+    { metric: "Open Actions", value: formatNumber(audit.actions.filter((row) => normalizeKey(row.status) !== "CLOSED").length), definition: "Persistent actions not closed." },
+  ];
+}
+
+function dateDiffDays(start, end) {
+  if (!(start instanceof Date) || !(end instanceof Date)) return null;
+  return Math.round((end.getTime() - start.getTime()) / 86400000);
+}
+
+function auditFieldDisplay(value, field = {}) {
+  if (value === "" || value === null || value === undefined) return "Not Captured";
+  if (field.type === "money") return money(number(value));
+  if (field.type === "date") return formatDate(value);
+  if (field.type === "number") return formatNumber(number(value));
+  return String(value);
+}
+
+function renderProcurementAuditWorkspace(derived = buildDerived()) {
+  const panel = document.getElementById("procurementAuditPanel");
+  if (!panel) return;
+  panel.classList.toggle("hidden", !state.showProcurementAudit);
+  if (!state.showProcurementAudit) return;
+
+  const tab = PROCUREMENT_AUDIT_TABS.includes(state.procurementAuditTab)
+    ? state.procurementAuditTab
+    : "Vendor Master";
+  state.procurementAuditTab = tab;
+  const config = PROCUREMENT_AUDIT_CONFIG[tab] || {};
+  const rows = buildProcurementAuditRows(tab, derived);
+  const fields =
+    tab === "KPI Summary"
+      ? [
+          { key: "metric", label: "KPI" },
+          { key: "value", label: "Value" },
+          { key: "definition", label: "Definition" },
+        ]
+      : (config.fields || []).filter((field) => !field.hidden);
+  const editable = tab !== "KPI Summary";
+  const addButton = document.getElementById("addProcurementAuditRecordBtn");
+  if (addButton)
+    addButton.classList.toggle("hidden", !config.collection || !editable);
+
+  const tabs = document.getElementById("procurementAuditTabs");
+  if (tabs) {
+    tabs.innerHTML = PROCUREMENT_AUDIT_TABS.map(
+      (name) =>
+        `<button class="report-tab${name === tab ? " active" : ""}" type="button" data-procurement-audit-tab="${escapeHtml(name)}">${escapeHtml(name)}</button>`,
+    ).join("");
+  }
+
+  const head = document.getElementById("procurementAuditHead");
+  if (head) {
+    head.innerHTML = `<tr>${fields
+      .map((field) => `<th>${escapeHtml(field.label)}</th>`)
+      .join("")}${editable ? "<th>Actions</th>" : ""}</tr>`;
+  }
+  const body = document.getElementById("procurementAuditBody");
+  if (body) {
+    body.innerHTML = rows.length
+      ? rows
+          .map(
+            (row) => `<tr>${fields
+              .map(
+                (field) =>
+                  `<td>${escapeHtml(auditFieldDisplay(row[field.key], field))}</td>`,
+              )
+              .join("")}${
+                editable
+                  ? `<td><div class="inline-actions audit-row-actions"><button class="ghost-btn small-btn" type="button" data-audit-edit="${escapeHtml(row.__id)}">Edit</button>${config.collection ? `<button class="danger-btn small-btn" type="button" data-audit-delete="${escapeHtml(row.__id)}">Delete</button>` : ""}</div></td>`
+                  : ""
+              }</tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="${fields.length + (editable ? 1 : 0)}" class="empty-state">No ${escapeHtml(tab.toLowerCase())} records yet.</td></tr>`;
+  }
+
+  const audit = procurementAuditState();
+  const dashboard = document.getElementById("procurementAuditDashboard");
+  if (dashboard) {
+    const kpis = buildProcurementAuditKpis(derived);
+    dashboard.innerHTML = kpis
+      .slice(0, 6)
+      .map(
+        (row) => `<article class="audit-summary-card"><span>${escapeHtml(row.metric)}</span><strong>${escapeHtml(row.value)}</strong></article>`,
+      )
+      .join("");
+  }
+  const coverage = document.getElementById("procurementAuditCoverage");
+  if (coverage) {
+    const missingLineAudits = buildProcurementAuditRows("Line Item Audit", derived)
+      .filter((row) => !row.purchaseType || !row.auditType || !row.riskLevel)
+      .length;
+    const summary = document.getElementById("procurementAuditSummary");
+    if (summary)
+      summary.textContent = `${rows.length} ${tab.toLowerCase()} rows. Records are saved locally and prepared for authenticated Supabase sync.`;
+    coverage.textContent = `${formatNumber(audit.invoices.length)} invoices, ${formatNumber(audit.payments.length)} payments, ${formatNumber(audit.receipts.length)} receipts, ${formatNumber(missingLineAudits)} line audits incomplete.`;
+  }
+}
+
+function auditFormOptions(field, derived) {
+  if (field.options) return field.options.map((value) => ({ value, label: value }));
+  if (field.sourceOptions === "po") {
+    return (derived.pos || [])
+      .slice()
+      .sort((a, b) => comparePoNumbers(a.poNumber, b.poNumber))
+      .map((po) => ({
+        value: po.poNumber,
+        label: `${po.poNumber} - ${po.vendorName}`,
+      }));
+  }
+  if (field.sourceOptions === "line") {
+    return [...auditLineMap().values()].map((line) => ({
+      value: line.id,
+      label: `${line.poNumber} - ${line.itemDesc}`,
+    }));
+  }
+  if (field.sourceOptions === "invoice") {
+    return procurementAuditState().invoices.map((invoice) => ({
+      value: invoice.id,
+      label: `${invoice.poNumber} - ${invoice.invoiceNumber}`,
+    }));
+  }
+  return [];
+}
+
+function openProcurementAuditModal(recordId = null) {
+  const tab = state.procurementAuditTab;
+  const config = PROCUREMENT_AUDIT_CONFIG[tab];
+  if (!config || config.readonly) return;
+  const derived = buildDerived();
+  const rows = buildProcurementAuditRows(tab, derived);
+  const record = recordId
+    ? rows.find((row) => cleanText(row.__id) === cleanText(recordId)) || {}
+    : {};
+  state.procurementAuditEditingId = recordId || null;
+
+  const title = document.getElementById("procurementAuditModalTitle");
+  const subtext = document.getElementById("procurementAuditModalSubtext");
+  if (title) title.textContent = `${recordId ? "Edit" : "Add"} ${tab} Record`;
+  if (subtext)
+    subtext.textContent =
+      "Enter verified information only. Missing evidence should remain Not Captured or be added to Missing Documents.";
+  const mount = document.getElementById("procurementAuditFormFields");
+  if (!mount) return;
+  mount.innerHTML = (config.fields || [])
+    .filter((field) => !field.hidden)
+    .map((field) => {
+      const value = record[field.key] ?? "";
+      const options = auditFormOptions(field, derived);
+      const classes = field.type === "textarea" ? "field-full" : "field";
+      const required = field.required ? " required" : "";
+      const readonly = field.readonly ? " readonly" : "";
+      if (options.length || field.options || field.sourceOptions) {
+        return `<label class="${classes}"><span>${escapeHtml(field.label)}</span><select class="control-input" name="${escapeHtml(field.key)}"${required}${field.readonly ? " disabled" : ""}><option value="">Select</option>${options.map((option) => `<option value="${escapeHtml(option.value)}"${String(option.value) === String(value) ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label>`;
+      }
+      if (field.type === "textarea") {
+        return `<label class="${classes}"><span>${escapeHtml(field.label)}</span><textarea name="${escapeHtml(field.key)}"${required}${readonly}>${escapeHtml(value)}</textarea></label>`;
+      }
+      const inputType = ["date", "email", "number"].includes(field.type)
+        ? field.type
+        : "text";
+      return `<label class="${classes}"><span>${escapeHtml(field.label)}</span><input class="control-input" name="${escapeHtml(field.key)}" type="${inputType}" value="${escapeHtml(value)}"${required}${readonly}${field.min != null ? ` min="${field.min}"` : ""}${field.max != null ? ` max="${field.max}"` : ""}${field.step ? ` step="${field.step}"` : ""} /></label>`;
+    })
+    .join("");
+  document
+    .getElementById("procurementAuditModalBackdrop")
+    ?.classList.remove("hidden");
+}
+
+function closeProcurementAuditModal() {
+  document
+    .getElementById("procurementAuditModalBackdrop")
+    ?.classList.add("hidden");
+  state.procurementAuditEditingId = null;
+}
+
+function auditFormValue(form, field) {
+  const element = form.elements.namedItem(field.key);
+  if (!element) return "";
+  const value = cleanText(element.value);
+  if (field.type === "number" || field.type === "money")
+    return value === "" ? "" : number(value);
+  return value;
+}
+
+function rejectProcurementAuditField(form, fieldName, message) {
+  const element = form.elements.namedItem(fieldName);
+  if (!element) {
+    window.alert(message);
+    return false;
+  }
+  element.setCustomValidity(message);
+  element.reportValidity();
+  const clearError = () => element.setCustomValidity("");
+  element.addEventListener("input", clearError, { once: true });
+  element.addEventListener("change", clearError, { once: true });
+  element.focus();
+  return false;
+}
+
+function validateProcurementAuditRecord(tab, record, form) {
+  if (tab === "Vendor Master" && record.gstin) {
+    record.gstin = cleanText(record.gstin).toUpperCase();
+    if (!/^[0-9A-Z]{15}$/.test(record.gstin))
+      return rejectProcurementAuditField(
+        form,
+        "gstin",
+        "GSTIN must contain exactly 15 letters or numbers.",
+      );
+  }
+
+  if (tab === "PO Master") {
+    const advancePaid = toNumeric(record.advancePaid);
+    const poTotal = toNumeric(record.poTotal);
+    if (advancePaid < 0 || (poTotal > 0 && advancePaid > poTotal))
+      return rejectProcurementAuditField(
+        form,
+        "advancePaid",
+        "Advance paid must be between zero and the PO total.",
+      );
+  }
+
+  if (tab === "Invoices") {
+    if (toNumeric(record.invoiceAmount) <= 0)
+      return rejectProcurementAuditField(
+        form,
+        "invoiceAmount",
+        "Invoice amount must be greater than zero.",
+      );
+    const duplicate = procurementAuditState().invoices.some(
+      (invoice) =>
+        cleanText(invoice.id) !== cleanText(state.procurementAuditEditingId) &&
+        cleanText(invoice.poNumber) === cleanText(record.poNumber) &&
+        normalizeKey(invoice.invoiceNumber) === normalizeKey(record.invoiceNumber),
+    );
+    if (duplicate)
+      return rejectProcurementAuditField(
+        form,
+        "invoiceNumber",
+        "This invoice number is already recorded for the selected PO.",
+      );
+  }
+
+  if (tab === "Payments") {
+    if (toNumeric(record.amount) <= 0)
+      return rejectProcurementAuditField(
+        form,
+        "amount",
+        "Payment amount must be greater than zero.",
+      );
+    const invoice = procurementAuditState().invoices.find(
+      (row) => cleanText(row.id) === cleanText(record.invoiceId),
+    );
+    if (invoice && cleanText(invoice.poNumber) !== cleanText(record.poNumber))
+      return rejectProcurementAuditField(
+        form,
+        "invoiceId",
+        "The selected invoice belongs to a different PO.",
+      );
+  }
+
+  if (tab === "Receipts") {
+    if (toNumeric(record.rejectionQuantity) > toNumeric(record.receivedQuantity))
+      return rejectProcurementAuditField(
+        form,
+        "rejectionQuantity",
+        "Rejected quantity cannot exceed received quantity.",
+      );
+    const line = auditLineMap().get(cleanText(record.lineId));
+    if (line && cleanText(line.poNumber) !== cleanText(record.poNumber))
+      return rejectProcurementAuditField(
+        form,
+        "lineId",
+        "The selected PO line belongs to a different PO.",
+      );
+  }
+
+  return true;
+}
+
+function saveProcurementAuditRecord(event) {
+  event.preventDefault();
+  const tab = state.procurementAuditTab;
+  const config = PROCUREMENT_AUDIT_CONFIG[tab];
+  if (!config || config.readonly) return;
+  const form = event.currentTarget;
+  const existingRows = buildProcurementAuditRows(tab, buildDerived());
+  const existing =
+    existingRows.find(
+      (row) =>
+        cleanText(row.__id) === cleanText(state.procurementAuditEditingId),
+    ) || {};
+  const record = { ...existing };
+  (config.fields || []).forEach((field) => {
+    if (field.hidden) return;
+    if (field.readonly && existing[field.key] != null) {
+      record[field.key] = existing[field.key];
+      return;
+    }
+    record[field.key] = auditFormValue(form, field);
+  });
+  if (!validateProcurementAuditRecord(tab, record, form)) return;
+  const audit = procurementAuditState();
+
+  if (config.source === "vendor") {
+    const vendorName = cleanText(record.vendorName);
+    state.vendorContacts[vendorName] = {
+      ...(state.vendorContacts[vendorName] || {}),
+      vendorName,
+      vendorCategory: record.vendorCategory,
+      contactPerson: record.contactPerson,
+      contactPerson2: record.contactPerson2,
+      email: record.email,
+      phone: record.phone,
+      phone2: record.phone2,
+      currencyCode: record.currencyCode || "INR",
+      source: record.source,
+      gstin: record.gstin,
+    };
+  } else if (config.source === "po") {
+    audit.poMaster[cleanText(record.poNumber)] = {
+      ...(audit.poMaster[cleanText(record.poNumber)] || {}),
+      purchaseCategory: record.purchaseCategory,
+      gstIncluded: record.gstIncluded,
+      advancePaid: record.advancePaid,
+      auditStatus: record.auditStatus || "Pending",
+      auditNotes: record.auditNotes || "",
+    };
+  } else if (config.source === "line") {
+    audit.lineAudits[cleanText(record.lineId)] = Object.fromEntries(
+      (config.fields || [])
+        .filter((field) => !field.readonly && !field.hidden)
+        .map((field) => [field.key, record[field.key]]),
+    );
+  } else if (config.source === "vendorAudit") {
+    const vendorName = cleanText(record.vendorName);
+    audit.vendorAudits[vendorName] = Object.fromEntries(
+      (config.fields || [])
+        .filter(
+          (field) =>
+            !field.readonly &&
+            !["overallScore", "classification"].includes(field.key),
+        )
+        .map((field) => [field.key, record[field.key]]),
+    );
+  } else if (config.collection) {
+    const collection = audit[config.collection];
+    const id = state.procurementAuditEditingId || uid("audit");
+    const selectedPo = auditPoMap(buildDerived()).get(cleanText(record.poNumber));
+    const nextRecord = {
+      ...record,
+      id,
+      vendorName: record.vendorName || selectedPo?.vendorName || "",
+      updatedAt: new Date().toISOString(),
+    };
+    const index = collection.findIndex((row) => cleanText(row.id) === cleanText(id));
+    if (index >= 0) collection[index] = nextRecord;
+    else collection.push(nextRecord);
+  }
+
+  saveState();
+  closeProcurementAuditModal();
+  renderAll();
+  syncProcurementAuditToSupabase();
+}
+
+function deleteProcurementAuditRecord(recordId) {
+  const config = PROCUREMENT_AUDIT_CONFIG[state.procurementAuditTab];
+  if (!config?.collection || !recordId) return;
+  const ok = window.confirm("Delete this audit record?");
+  if (!ok) return;
+  const audit = procurementAuditState();
+  audit[config.collection] = audit[config.collection].filter(
+    (row) => cleanText(row.id) !== cleanText(recordId),
+  );
+  if (config.collection === "invoices") {
+    audit.payments = audit.payments.map((payment) =>
+      cleanText(payment.invoiceId) === cleanText(recordId)
+        ? { ...payment, invoiceId: "" }
+        : payment,
+    );
+  }
+  if (config.collection === "risks") {
+    audit.actions = audit.actions.map((action) =>
+      cleanText(action.riskId) === cleanText(recordId)
+        ? { ...action, riskId: "" }
+        : action,
+    );
+  }
+  saveState();
+  renderAll();
+  deleteProcurementAuditRecordFromSupabase(config.collection, recordId);
+}
+
+function handleProcurementAuditTableAction(event) {
+  const edit = event.target.closest("[data-audit-edit]");
+  if (edit) {
+    openProcurementAuditModal(edit.dataset.auditEdit);
+    return;
+  }
+  const remove = event.target.closest("[data-audit-delete]");
+  if (remove) deleteProcurementAuditRecord(remove.dataset.auditDelete);
+}
+
 function renderReports(derived = buildDerived()) {
   const rows = buildProcurementReportRows(derived);
   const mechanicalAnalysis = buildMechanicalAnalysis(derived);
@@ -7751,12 +9521,21 @@ function renderReports(derived = buildDerived()) {
           <div class="kpi-note">${escapeHtml(formatNumber(mechanicalAnalysis.summary.lineCount))} lines - ${escapeHtml(formatNumber(mechanicalAnalysis.summary.mechanicalSpendPercent))}% of BOM</div>
         </div>
       </article>
+      <article class="kpi-card kpi-cyan report-kpi-card" data-report-action="open-audit" role="button" tabindex="0">
+        <div class="kpi-icon">${kpiIconSvg("shield")}</div>
+        <div class="kpi-content">
+          <div class="kpi-label"><span>Procurement Audit Workspace</span></div>
+          <div class="kpi-value">${escapeHtml(formatNumber(procurementAuditState().risks.filter((row) => normalizeKey(row.status) !== "CLOSED").length))}</div>
+          <div class="kpi-note">Open risks - evidence-based audit records</div>
+        </div>
+      </article>
     `;
   }
 
   const panel = document.getElementById("procurementReportPanel");
   if (panel) panel.classList.toggle("hidden", !state.showProcurementReport);
   renderMechanicalAnalysis(mechanicalAnalysis);
+  renderProcurementAuditWorkspace(derived);
   if (!panel || !state.showProcurementReport) return;
 
   const head = document.getElementById("procurementReportHead");
@@ -7794,6 +9573,7 @@ function handleReportAction(event) {
   if (card.dataset.reportAction === "open-procurement") {
     state.showProcurementReport = true;
     state.showMechanicalAnalysis = false;
+    state.showProcurementAudit = false;
     renderReports(buildDerived());
     document
       .getElementById("procurementReportPanel")
@@ -7803,9 +9583,20 @@ function handleReportAction(event) {
   if (card.dataset.reportAction === "open-mechanical") {
     state.showMechanicalAnalysis = true;
     state.showProcurementReport = false;
+    state.showProcurementAudit = false;
     renderReports(buildDerived());
     document
       .getElementById("mechanicalAnalysisPanel")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (card.dataset.reportAction === "open-audit") {
+    state.showProcurementAudit = true;
+    state.showMechanicalAnalysis = false;
+    state.showProcurementReport = false;
+    renderReports(buildDerived());
+    document
+      .getElementById("procurementAuditPanel")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 }
@@ -8415,339 +10206,210 @@ function buildSourcingAuditWorkbook() {
     return comments.join(" ");
   };
 
-  const poMasterRows = pos.map((po) => [
-    cell(po.poNumber),
-    cell(cleanText(po.poDate)),
-    cell(auditVendorName(po.vendorName)),
-    cell(auditCategory(po)),
-    cell(totalAmount(po), "money", 3),
-    cell(yesNo(number(po.taxTotal) > 0)),
-    cell(paidAmount(po), "money", 3),
-    cell(pendingBalance(po), "money", 3),
-    cell(auditPayment(po)),
-    cell(auditDelivery(po)),
-    cell(grnAvailable(po)),
-    cell(invoiceAvailable(po)),
-    cell(auditStatus(po)),
+  const vendorMasterData = buildProcurementAuditRows("Vendor Master", derived);
+  const poMasterData = buildProcurementAuditRows("PO Master", derived);
+  const lineAuditData = buildProcurementAuditRows("Line Item Audit", derived);
+  const vendorAuditData = buildProcurementAuditRows("Vendor Audit", derived);
+  const auditData = procurementAuditState();
+  const vendorMasterRows = vendorMasterData.map((vendor) => [
+    cell(vendor.vendorName),
+    cell(vendor.vendorCategory),
+    cell(vendor.contactPerson),
+    cell(vendor.contactPerson2),
+    cell(vendor.email),
+    cell(vendor.phone),
+    cell(vendor.phone2),
+    cell(vendor.currencyCode || "INR"),
+    cell(vendor.source),
+    cell(vendor.gstin),
   ]);
-
-  const repeatedProducts = new Set();
+  const poMasterRows = poMasterData.map((po) => [
+    cell(po.poNumber),
+    cell(po.poDate),
+    cell(po.vendorName),
+    cell(po.purchaseCategory),
+    cell(po.poTotal, "money", 3),
+    cell(po.gstIncluded),
+    cell(po.advancePaid, "money", 3),
+    cell(po.balancePaid, "money", 3),
+    cell(po.paymentStatus),
+    cell(po.expectedDeliveryDate),
+    cell(po.actualDeliveryDate),
+    cell(po.deliveryStatus),
+    cell(po.grnAvailable),
+    cell(po.invoiceAvailable),
+    cell(po.auditStatus),
+  ]);
   const lineRows = [];
-  for (let index = 0; index < Math.max(100, lineItems.length); index += 1) {
+  for (let index = 0; index < Math.max(100, lineAuditData.length); index += 1) {
     const rowNumber = index + 2;
-    const line = lineItems[index];
-    const po = line ? poByNumber.get(cleanText(line.poNumber)) || {} : {};
-    const itemName = cleanText(line?.itemDesc);
-    const quoteCount = productQuoteCounts.get(itemName) || 1;
-    const isRepeat = repeatedProducts.has(itemName);
-    if (itemName) repeatedProducts.add(itemName);
-    const delayed = line ? isPoDelayed(po) : false;
-    const risk = line ? (delayed ? "High" : quoteCount > 1 ? "Low" : "Medium") : "";
-    const lineTotal = line
-      ? roundMoney(number(line.quantityOrdered) * number(line.itemPrice))
-      : "";
+    const line = lineAuditData[index];
+    const lineTotal = line ? number(line.quantity) * number(line.unitPrice) : "";
     lineRows.push([
       cell(line?.poNumber || ""),
-      cell(itemName),
-      cell(line ? number(line.quantityOrdered) : "", "number", 4),
-      cell(line ? number(line.itemPrice) : "", "money", 3),
-      formulaCell(`=C${rowNumber}*D${rowNumber}`, 3, lineTotal),
-      cell(line ? (isRepeat ? "Repeat Sourcing" : "First Sourcing") : ""),
-      cell(line ? "First Audit" : ""),
-      cell(line ? "Production" : ""),
-      cell(line ? "Existing" : ""),
-      cell(line ? (delayed ? "Emergency" : "Normal") : ""),
-      cell(line ? quoteCount : "", "number", 4),
-      cell(line ? "Pending" : ""),
-      cell(line ? yesNo(quoteCount > 1) : ""),
-      cell(line ? yesNo(quoteCount > 1) : ""),
-      cell(risk),
-      cell(
-        line
-          ? risk === "Low"
-            ? "No immediate action"
-            : "Add quote comparison, benchmark, technical approval, backup vendor, or approved exception"
-          : "",
-      ),
-      cell(""),
-      cell(delayed ? "Delayed" : ""),
-      cell(""),
+      cell(line?.vendorName || ""),
+      cell(line?.itemName || ""),
+      cell(line ? number(line.quantity) : "", "number", 4),
+      cell(line ? number(line.unitPrice) : "", "money", 3),
+      formulaCell(`=D${rowNumber}*E${rowNumber}`, 3, lineTotal),
+      cell(line?.purchaseType || ""),
+      cell(line?.auditType || ""),
+      cell(line?.itemMaturity || ""),
+      cell(line?.vendorType || ""),
+      cell(line?.purchaseUrgency || ""),
+      cell(line?.quoteCount ?? "", "number", 4),
+      cell(line?.technicalValidation || ""),
+      cell(line?.priceBenchmarkAvailable || ""),
+      cell(line?.backupVendorAvailable || ""),
+      cell(line?.riskLevel || ""),
+      cell(line?.actionRequired || ""),
+      cell(line?.priceVariance ?? "", "number", 4),
+      cell(line?.deliveryVariance ?? "", "number", 4),
+      cell(line?.qualityVariance || ""),
     ]);
   }
-
-  const vendorStats = new Map();
-  pos.forEach((po) => {
-    const key = auditVendorName(po.vendorName);
-    if (!key) return;
-    if (!vendorStats.has(key))
-      vendorStats.set(key, { pos: 0, delayed: 0, delivered: 0 });
-    const stat = vendorStats.get(key);
-    stat.pos += 1;
-    if (isPoDelayed(po)) stat.delayed += 1;
-    if (auditDelivery(po) === "Delivered") stat.delivered += 1;
-  });
-  const vendorNames = [
-    ...new Set([
-      ...pos.map((po) => auditVendorName(po.vendorName)).filter(Boolean),
-      ...(derived.vendors || [])
-        .map((vendor) => auditVendorName(vendor.vendorName))
-        .filter(Boolean),
-    ]),
-  ].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-  const vendorClassification = (score) => {
-    if (score >= 85) return "Preferred";
-    if (score >= 70) return "Approved";
-    if (score >= 50) return "Conditional";
-    return "Replace";
-  };
   const vendorRows = [];
-  for (let index = 0; index < Math.max(100, vendorNames.length); index += 1) {
+  for (let index = 0; index < Math.max(100, vendorAuditData.length); index += 1) {
     const rowNumber = index + 2;
-    const vendorName = vendorNames[index] || "";
-    const stat = vendorStats.get(vendorName) || { pos: 0, delayed: 0 };
-    const deliveryScore = vendorName
-      ? Math.max(45, Math.round(90 - (stat.delayed / Math.max(stat.pos, 1)) * 35))
-      : "";
-    const scoreInputs = vendorName
-      ? [75, 80, deliveryScore, 75, 75, 70, 65]
-      : [];
-    const overallScore = scoreInputs.length
-      ? roundMoney(scoreInputs.reduce((sum, score) => sum + number(score), 0) / scoreInputs.length)
-      : "";
+    const vendor = vendorAuditData[index];
     vendorRows.push([
-      cell(vendorName),
-      cell(vendorName ? 75 : "", "number", 4),
-      cell(vendorName ? 80 : "", "number", 4),
-      cell(deliveryScore, "number", 4),
-      cell(vendorName ? 75 : "", "number", 4),
-      cell(vendorName ? 75 : "", "number", 4),
-      cell(vendorName ? 70 : "", "number", 4),
-      cell(vendorName ? 65 : "", "number", 4),
-      formulaCell(`=AVERAGE(B${rowNumber}:H${rowNumber})`, 4, overallScore),
+      cell(vendor?.vendorName || ""),
+      cell(vendor?.priceCompetitiveness ?? "", "number", 4),
+      cell(vendor?.quality ?? "", "number", 4),
+      cell(vendor?.deliveryReliability ?? "", "number", 4),
+      cell(vendor?.technicalCapability ?? "", "number", 4),
+      cell(vendor?.responsiveness ?? "", "number", 4),
+      cell(vendor?.paymentFlexibility ?? "", "number", 4),
+      cell(vendor?.documentationDiscipline ?? "", "number", 4),
       formulaCell(
-        `=IF(I${rowNumber}>=85,"Preferred",IF(I${rowNumber}>=70,"Approved",IF(I${rowNumber}>=50,"Conditional","Replace")))`,
-        0,
-        overallScore === "" ? "" : vendorClassification(overallScore),
+        `=IF(COUNT(B${rowNumber}:H${rowNumber})=0,"",SUMPRODUCT(B${rowNumber}:H${rowNumber},{0.2,0.2,0.2,0.15,0.1,0.05,0.1})/SUMPRODUCT(--(B${rowNumber}:H${rowNumber}<>""),{0.2,0.2,0.2,0.15,0.1,0.05,0.1}))`,
+        4,
+        vendor?.overallScore ?? "",
       ),
+      formulaCell(
+        `=IF(I${rowNumber}="","Not Assessed",IF(I${rowNumber}>8,"Preferred",IF(I${rowNumber}>=6,"Approved",IF(I${rowNumber}>=4,"Conditional","Avoid"))))`,
+        0,
+        vendor?.classification || "Not Assessed",
+      ),
+      cell(vendor?.notes || ""),
     ]);
   }
-
-  const moneyRows = pos.map((po) => {
-    const received = materialReceived(po);
-    const qtyReceived =
-      received === "Full"
-        ? number(po.totalQty)
-        : received === "Partial"
-          ? roundMoney(number(po.totalQty) / 2)
-          : 0;
+  const invoiceById = new Map(
+    auditData.invoices.map((invoice) => [cleanText(invoice.id), invoice]),
+  );
+  const receiptsByPo = new Map();
+  auditData.receipts.forEach((receipt) => {
+    const key = cleanText(receipt.poNumber);
+    if (!receiptsByPo.has(key)) receiptsByPo.set(key, []);
+    receiptsByPo.get(key).push(receipt);
+  });
+  const moneySourceRows = auditData.payments.length
+    ? auditData.payments
+    : auditData.invoices.map((invoice) => ({
+        id: `invoice-${invoice.id}`,
+        poNumber: invoice.poNumber,
+        invoiceId: invoice.id,
+        paymentDate: "",
+        paymentType: "",
+        amount: 0,
+        paymentReference: "",
+        proofAvailable: "No",
+        approved: "No",
+        remarks: "Invoice captured; payment not recorded.",
+      }));
+  const moneyRows = moneySourceRows.map((payment) => {
+    const po = poByNumber.get(cleanText(payment.poNumber)) || {};
+    const invoice = invoiceById.get(cleanText(payment.invoiceId)) || {};
+    const receipts = receiptsByPo.get(cleanText(payment.poNumber)) || [];
+    const quantityReceived = receipts.reduce(
+      (sum, receipt) => sum + number(receipt.receivedQuantity),
+      0,
+    );
+    const rejectionQuantity = receipts.reduce(
+      (sum, receipt) => sum + number(receipt.rejectionQuantity),
+      0,
+    );
+    const inspectionStatuses = receipts
+      .map((receipt) => cleanText(receipt.inspectionStatus))
+      .filter(Boolean);
+    const materialReceived =
+      quantityReceived <= 0
+        ? "None"
+        : quantityReceived >= number(po.totalQty)
+          ? "Full"
+          : "Partial";
+    const inspectionPassed = inspectionStatuses.length
+      ? inspectionStatuses.every((status) => normalizeKey(status) === "PASSED")
+        ? "Yes"
+        : "No"
+      : "Not Captured";
     return [
-      cell(po.poNumber),
-      cell(auditVendorName(po.vendorName)),
-      cell(invoiceNumber(po)),
-      cell(invoiceDate(po)),
-      cell(totalAmount(po), "money", 3),
-      cell(paidAmount(po), "money", 3),
-      cell("Yes"),
-      cell(invoiceAvailable(po)),
-      cell(paymentProofAvailable(po)),
-      cell(gstCorrect(po)),
-      cell(yesNo(number(po.totalChargeValue) > 0)),
-      cell(yesNo(number(po.totalChargeValue) > 0)),
-      cell(paymentApproval(po)),
-      cell(received),
-      cell(grnAvailable(po)),
+      cell(payment.poNumber),
+      cell(po.vendorName || invoice.vendorName || ""),
+      cell(invoice.invoiceNumber || ""),
+      cell(invoice.invoiceDate || ""),
+      cell(invoice.invoiceAmount ?? "", "money", 3),
+      cell(payment.paymentDate || ""),
+      cell(payment.paymentType || ""),
+      cell(payment.amount ?? 0, "money", 3),
+      cell(payment.paymentReference || ""),
+      cell(invoice.invoiceNumber ? "Yes" : "No"),
+      cell(payment.proofAvailable || "No"),
+      cell(invoice.gstCorrect || "Not Captured"),
+      cell(invoice.freightIncluded || "No"),
+      cell(invoice.freightAmount ?? 0, "money", 3),
+      cell(invoice.extraCharges ?? 0, "money", 3),
+      cell(payment.approved || "No"),
+      cell(materialReceived),
+      cell(receipts.some((receipt) => cleanText(receipt.grnNumber)) ? "Yes" : "No"),
       cell(number(po.totalQty), "number", 4),
-      cell(qtyReceived, "number", 4),
-      cell(yesNo(received === "Full")),
-      cell(0, "number", 4),
-      cell(moneyAuditStatus(po)),
-      cell(moneyAuditComments(po)),
+      cell(quantityReceived, "number", 4),
+      cell(inspectionPassed),
+      cell(rejectionQuantity, "number", 4),
+      cell(payment.remarks || invoice.comments || ""),
     ];
   });
 
-  const missingRows = [];
-  pos.forEach((po) => {
-    if (invoiceAvailable(po) === "No") {
-      missingRows.push([
-        cell(po.poNumber),
-        cell(auditVendorName(po.vendorName)),
-        cell("Invoice"),
-        cell("Pending"),
-        cell("Invoice number/date is missing, so invoice cannot be traced."),
-      ]);
-    }
-    if (paymentProofAvailable(po) === "No") {
-      missingRows.push([
-        cell(po.poNumber),
-        cell(auditVendorName(po.vendorName)),
-        cell("Payment Proof"),
-        cell("Pending"),
-        cell("Payment proof is missing or paid amount is not recorded."),
-      ]);
-    }
-    if (grnAvailable(po) === "No") {
-      missingRows.push([
-        cell(po.poNumber),
-        cell(auditVendorName(po.vendorName)),
-        cell("GRN"),
-        cell("Pending"),
-        cell("Material receipt is not marked full."),
-      ]);
-    }
-    if (gstCorrect(po) === "No") {
-      missingRows.push([
-        cell(po.poNumber),
-        cell(auditVendorName(po.vendorName)),
-        cell("GST Verification"),
-        cell("Pending"),
-        cell("GST correctness could not be verified."),
-      ]);
-    }
-  });
-
-  const risks = [];
-  pos.forEach((po) => {
-    const docGaps = [];
-    if (invoiceAvailable(po) === "No") docGaps.push("invoice");
-    if (paymentProofAvailable(po) === "No") docGaps.push("payment proof");
-    if (grnAvailable(po) === "No") docGaps.push("GRN");
-    if (hasClaimedPaidWithoutAmount(po)) {
-      risks.push({
-        item: po.poNumber,
-        finding: "Paid status has zero paid amount",
-        risk: "Payment Verification Risk",
-        evidence: `${auditVendorName(po.vendorName)} - payment status Paid, paid amount INR 0.00`,
-        impact: "Spend cannot be verified from payment evidence",
-        action: "Correct payment status or update paid amount with proof",
-        priority: "High",
-        dueDate: addWorkingDays(1),
-      });
-    }
-    if (docGaps.length) {
-      risks.push({
-        item: po.poNumber,
-        finding: "Missing audit documents",
-        risk: "Documentation Gap",
-        evidence: `${auditVendorName(po.vendorName)} - missing ${docGaps.join(", ")}`,
-        impact: "Audit status must stay In Progress until evidence is attached",
-        action: "Collect missing invoice, payment proof, or GRN evidence",
-        priority: docGaps.includes("invoice") || docGaps.includes("payment proof") ? "High" : "Medium",
-        dueDate: addWorkingDays(docGaps.includes("invoice") || docGaps.includes("payment proof") ? 3 : 2),
-      });
-    }
-    if (isPoDelayed(po)) {
-      risks.push({
-        item: po.poNumber,
-        finding: "PO delivery delayed",
-        risk: "Delivery Risk",
-        evidence: `${auditVendorName(po.vendorName)} - delivery date ${formatDate(po.deliveryDate)}`,
-        impact: "Production or project schedule may slip",
-        action: "Confirm revised delivery date and escalation owner",
-        priority: "High",
-        dueDate: addWorkingDays(1),
-      });
-    }
-    if (pendingBalance(po) > 0) {
-      risks.push({
-        item: po.poNumber,
-        finding: "Payment balance pending",
-        risk: "Financial Follow-up",
-        evidence: `Pending payment ${money(pendingBalance(po))}`,
-        impact: "Vendor payment closure pending",
-        action: "Verify invoice, approval, and payment plan",
-        priority: "Medium",
-        dueDate: addWorkingDays(3),
-      });
-    }
-  });
-  lineItems.forEach((line) => {
-    const quoteCount = productQuoteCounts.get(cleanText(line.itemDesc)) || 1;
-    if (quoteCount <= 1) {
-      risks.push({
-        item: line.poNumber,
-        finding: "Single-source / validation evidence pending",
-        risk: "Sourcing Risk",
-        evidence: cleanText(line.itemDesc),
-        impact: "No quote comparison, technical validation, price benchmark, or backup vendor evidence",
-        action: "Add quote comparison, benchmark, technical approval, backup vendor, or approved exception",
-        priority: "Medium",
-        dueDate: addWorkingDays(5),
-      });
-    }
-  });
-  const riskRows = risks.slice(0, 200).map((risk, index) => [
+  const missingRows = auditData.documents.map((document) => [
+    cell(document.poNumber || ""),
+    cell(
+      document.vendorName ||
+        poByNumber.get(cleanText(document.poNumber))?.vendorName ||
+        "",
+    ),
+    cell(document.documentType || ""),
+    cell(document.status || "Missing"),
+    cell(document.comments || ""),
+  ]);
+  const riskRows = auditData.risks.map((risk, index) => [
     cell(`R-${String(index + 1).padStart(3, "0")}`),
-    cell(risk.item),
-    cell(risk.finding),
-    cell(risk.risk),
-    cell(risk.evidence),
-    cell(risk.impact),
-    cell(risk.action),
-    cell("Procurement"),
-    cell(risk.priority),
+    cell(risk.itemPo || ""),
+    cell(risk.finding || ""),
+    cell(risk.risk || ""),
+    cell(risk.evidence || ""),
+    cell(risk.impact || ""),
+    cell(risk.action || ""),
+    cell(risk.owner || ""),
+    cell(risk.priority || "Medium"),
     cell(risk.dueDate || ""),
-    cell("Open"),
+    cell(risk.status || "Open"),
   ]);
-  const actionRows = risks.slice(0, 200).map((risk, index) => [
+  const actionRows = auditData.actions.map((action, index) => [
     cell(`A-${String(index + 1).padStart(3, "0")}`),
-    cell(risk.action),
-    cell("Procurement"),
-    cell(risk.priority),
-    cell(risk.dueDate || ""),
-    cell("Open"),
-    cell(`${risk.item}: ${risk.finding}`),
+    cell(action.description || ""),
+    cell(action.owner || ""),
+    cell(action.priority || "Medium"),
+    cell(action.dueDate || ""),
+    cell(action.status || "Open"),
+    cell(action.comments || ""),
   ]);
-
-  const poCount = pos.length;
-  const kpiTotalPoValue = roundMoney(pos.reduce((sum, po) => sum + totalAmount(po), 0));
-  const kpiPaidAmount = roundMoney(pos.reduce((sum, po) => sum + paidAmount(po), 0));
-  const kpiPendingPayment = roundMoney(
-    pos.reduce((sum, po) => sum + pendingBalance(po), 0),
-  );
-  const kpiMissingInvoiceSpend = roundMoney(
-    pos.reduce(
-      (sum, po) => sum + (invoiceAvailable(po) === "No" ? totalAmount(po) : 0),
-      0,
-    ),
-  );
-  const kpiMissingGrnSpend = roundMoney(
-    pos.reduce(
-      (sum, po) => sum + (grnAvailable(po) === "No" ? totalAmount(po) : 0),
-      0,
-    ),
-  );
-  const kpiItemsWithTwoQuotes = lineItems.filter(
-    (line) => (productQuoteCounts.get(cleanText(line.itemDesc)) || 1) >= 2,
-  ).length;
-  const kpiAdvancePaidMaterialPending = roundMoney(
-    pos.reduce(
-      (sum, po) =>
-        sum + (paymentApproval(po) === "Yes" && materialReceived(po) === "None" ? paidAmount(po) : 0),
-      0,
-    ),
-  );
-  const kpiOnTimeDeliveryRate = poCount
-    ? pos.filter((po) => auditDelivery(po) === "Delivered").length / poCount
-    : 0;
-  const kpiFirstPassAcceptanceRate = poCount
-    ? pos.filter((po) => materialReceived(po) === "Full").length / poCount
-    : 0;
-  const kpiRfqComplianceRate = lineItems.length
-    ? kpiItemsWithTwoQuotes / lineItems.length
-    : 0;
   const kpiRows = [
-    header(["KPI", "Value"]),
-    [cell("Total PO Value"), formulaCell("=SUM('PO Master'!E:E)", 3, kpiTotalPoValue)],
-    [cell("Total Paid Amount"), formulaCell("=SUM('PO Master'!G:G)", 3, kpiPaidAmount)],
-    [cell("Pending Payment"), formulaCell("=SUM('PO Master'!H:H)", 3, kpiPendingPayment)],
-    [cell("Spend Missing Invoice"), formulaCell('=SUMIF(\'PO Master\'!L:L,"No",\'PO Master\'!E:E)', 3, kpiMissingInvoiceSpend)],
-    [cell("Spend Missing GRN"), formulaCell('=SUMIF(\'PO Master\'!K:K,"No",\'PO Master\'!E:E)', 3, kpiMissingGrnSpend)],
-    [cell("Items With 2+ Quotes"), formulaCell('=COUNTIF(\'Line Item Audit\'!K:K,">=2")', 4, kpiItemsWithTwoQuotes)],
-    [cell("Advance Paid but Material Pending"), formulaCell('=SUMIFS(\'Money Spent Audit\'!F:F, \'Money Spent Audit\'!M:M,"Yes", \'Money Spent Audit\'!N:N,"None")', 3, kpiAdvancePaidMaterialPending)],
-    [cell("On-Time Delivery Rate"), formulaCell('=IF(COUNTA(\'PO Master\'!A2:A1000)=0,0, COUNTIF(\'PO Master\'!J2:J1000,"Delivered")/COUNTA(\'PO Master\'!A2:A1000))', 9, kpiOnTimeDeliveryRate)],
-    [cell("First-Pass Acceptance Rate"), formulaCell('=IF(COUNTA(\'Money Spent Audit\'!A2:A1000)=0,0, COUNTIF(\'Money Spent Audit\'!R2:R1000,"Yes")/COUNTA(\'Money Spent Audit\'!A2:A1000))', 9, kpiFirstPassAcceptanceRate)],
-    [cell("RFQ Compliance Rate"), formulaCell('=IF(COUNTA(\'Line Item Audit\'!A2:A1000)=0,0, COUNTIF(\'Line Item Audit\'!K2:K1000, ">=2")/COUNTA(\'Line Item Audit\'!A2:A1000))', 9, kpiRfqComplianceRate)],
-    [cell("PO-Before-Delivery Compliance"), formulaCell('=IF(COUNTA(\'Money Spent Audit\'!A2:A1000)=0,0, COUNTIF(\'Money Spent Audit\'!G2:G1000,"Yes")/COUNTA(\'Money Spent Audit\'!A2:A1000))', 9, poCount ? 1 : 0)],
+    header(["KPI", "Value", "Definition"]),
+    ...buildProcurementAuditKpis(derived).map((row) => [
+      cell(row.metric),
+      cell(row.value),
+      cell(row.definition),
+    ]),
   ];
 
   const howRows = [
@@ -8759,7 +10421,7 @@ function buildSourcingAuditWorkbook() {
     [cell("3", "text", 8), cell("Do not leave PO Number blank. It is the common link between sheets.", "text", 2)],
     [cell("4", "text", 8), cell("Do not overwrite formula cells unless instructed. Example: Total Value and KPI Summary formulas.", "text", 2)],
     [cell("5", "text", 8), cell("If evidence is missing, do not assume. Mark No or Pending and add it in Missing Documents.", "text", 2)],
-    [cell("6", "text", 8), cell("First Sourcing is judged on validation and baseline creation, not only savings. Repeat Sourcing is judged on optimization.", "text", 2)],
+    [cell("6", "text", 8), cell("Do not infer evidence. Invoice, payment, GRN, inspection, risk and action records must be entered in the Audit Workspace.", "text", 2)],
     [],
     [cell("Step-by-Step Filling Workflow", "text", 6)],
     ["Step", "Who Fills", "Sheet", "What to Fill", "When to Fill", "Output / Check"].map((value) => cell(value, "text", 7)),
@@ -8768,7 +10430,7 @@ function buildSourcingAuditWorkbook() {
     [cell("3"), cell("Finance/Admin"), cell("Money Spent Audit"), cell("Invoice amount, paid amount, PO available, invoice available, payment proof, GST, freight, extra charges, payment approval"), cell("At payment or invoice booking stage"), cell("Paid amount is supported by evidence")],
     [cell("4"), cell("Stores / Inward"), cell("Money Spent Audit"), cell("Material received, GRN available, ordered qty, received qty"), cell("When material reaches site/store"), cell("Receipt status is clear")],
     [cell("5"), cell("Quality / Engineering"), cell("Money Spent Audit"), cell("Inspection passed, rejection qty, comments"), cell("After inspection or trial"), cell("Accepted/rejected quantity is visible")],
-    [cell("6"), cell("Procurement / Audit Lead"), cell("Vendor Audit"), cell("Vendor score for price, quality, delivery, technical capability, responsiveness, payment terms, documentation"), cell("Weekly or after major purchase batch"), cell("Vendor classified as Preferred / Approved / Conditional / Replace")],
+    [cell("6"), cell("Procurement / Audit Lead"), cell("Vendor Audit"), cell("Vendor score for price, quality, delivery, technical capability, responsiveness, payment terms, documentation"), cell("Weekly or after major purchase batch"), cell("Vendor classified as Preferred / Approved / Conditional / Avoid")],
     [cell("7"), cell("Audit Lead"), cell("Missing Documents, Risk Register, Action Tracker"), cell("Document gaps, findings, risks, corrective actions, owners, due dates"), cell("During audit review"), cell("Each issue has owner and due date")],
     [cell("8"), cell("Founder / Audit Lead"), cell("KPI Summary"), cell("Review formulas only, do not manually edit values"), cell("Weekly review"), cell("Audit dashboard ready for decisions")],
     [],
@@ -8783,11 +10445,11 @@ function buildSourcingAuditWorkbook() {
     [],
     [cell("Sheet-wise Filling Instructions", "text", 6)],
     ["Sheet", "Mandatory Fields", "How to Fill", "Common Mistake to Avoid"].map((value) => cell(value, "text", 7)),
-    [cell("PO Master"), cell("PO Number, PO Date, Vendor Name, Category, Total PO Value, Payment Status, Delivery Status"), cell("One row per PO. Use total PO value including GST if that is how PO is issued. Keep Advance Paid and Pending Payment numeric."), cell("Do not create multiple rows for the same PO unless it is a revised PO.")],
-    [cell("Line Item Audit"), cell("PO Number, Item, Qty, Unit Price, Purchase Type, Audit Type, Quote Count, Technical Validation, Risk Level"), cell("One row per item. Mark First Sourcing/Repeat Sourcing and First Audit/Re-audit carefully."), cell("Do not judge first sourcing only on savings; focus on validation and benchmark.")],
-    [cell("Vendor Audit"), cell("Vendor Name and scores from 0-100"), cell("Score realistically. Overall Score and Classification are automatic."), cell("Do not type text in score columns; use numbers only.")],
+    [cell("PO Master"), cell("PO Number, PO Date, Vendor Name, Category, Total PO Value, Payment Status, Delivery Status"), cell("One row per PO. Expected and Actual Delivery Date are separate. Advance Paid and Balance Paid come from payment records."), cell("Do not create multiple rows for the same PO unless it is a revised PO.")],
+    [cell("Line Item Audit"), cell("PO Number, Item, Qty, Unit Price, Purchase Type, Audit Type, Quote Count, Technical Validation, Risk Level"), cell("One row per item. Use the guide values for purchase type, audit type, maturity, vendor type and urgency."), cell("Do not fill sourcing evidence from product-name assumptions.")],
+    [cell("Vendor Audit"), cell("Vendor Name and scores from 1-10"), cell("Score realistically. Overall Score and Classification are automatic weighted results."), cell("Do not type text in score columns; use numbers only.")],
     [cell("Money Spent Audit"), cell("PO Number, Invoice Amount, Paid Amount, PO/Invoice/Payment Proof flags, Material Received, GRN, Inspection Passed"), cell("Use Yes/No/None consistently. Add comments for any mismatch."), cell("Do not mark spend clean if GRN or inspection is missing.")],
-    [cell("Missing Documents"), cell("PO Number, Vendor, Document Type, Status"), cell("Add every missing document here immediately. Status can be Pending/Received/Not Required."), cell("Do not keep missing documents only in WhatsApp/email memory.")],
+    [cell("Missing Documents"), cell("PO Number, Vendor, Document Type, Status"), cell("Add every missing document here immediately. Status can be Missing, Requested, Received, Verified, Rejected or Not Required."), cell("Do not keep missing documents only in WhatsApp/email memory.")],
     [cell("Risk Register"), cell("Finding, Risk, Evidence, Impact, Action, Owner, Priority, Status"), cell("Every red flag should become a risk item with evidence and action."), cell("Do not write vague findings without PO number or evidence.")],
     [cell("Action Tracker"), cell("Action ID, Description, Owner, Priority, Due Date, Status"), cell("Use this to close audit gaps. Update weekly."), cell("Do not close an action unless evidence is available.")],
     [cell("KPI Summary"), cell("No manual input required"), cell("Only review. Values come from other sheets."), cell("Do not overwrite formulas.")],
@@ -8797,25 +10459,29 @@ function buildSourcingAuditWorkbook() {
     [cell("Yes/No fields"), cell("Yes, No")],
     [cell("Payment Status"), cell("Pending, Partially Paid, Paid")],
     [cell("Delivery Status"), cell("Pending, Partial, Delivered")],
-    [cell("Purchase Type"), cell("First Sourcing, Repeat Sourcing")],
-    [cell("Audit Type"), cell("First Audit, Re-audit")],
-    [cell("Item Maturity"), cell("Development, Prototype, Production")],
+    [cell("Purchase Type"), cell("Prototype, Production, Consumable, Tooling")],
+    [cell("Audit Type"), cell("Routine, Technical, Commercial")],
+    [cell("Item Maturity"), cell("Prototype, Alpha, Beta, Production")],
+    [cell("Vendor Type"), cell("OEM, Distributor, Local Manufacturer")],
+    [cell("Purchase Urgency"), cell("Low, Medium, High, Critical")],
     [cell("Technical Validation"), cell("Pending, Yes, No, Approved, Failed")],
-    [cell("Risk / Priority"), cell("High, Medium, Low")],
+    [cell("Risk / Priority"), cell("Critical, High, Medium, Low")],
     [cell("Material Received"), cell("None, Partial, Full")],
-    [cell("Status"), cell("Open, In Progress, Closed")],
-    [cell("Money Audit Status"), cell("Clean, Minor Gap, Major Gap, Open, High Risk")],
+    [cell("Risk Status"), cell("Open, Mitigated, Closed")],
+    [cell("Action Status"), cell("Open, In Progress, Closed")],
+    [cell("Document Status"), cell("Missing, Requested, Received, Verified, Rejected, Not Required")],
   ];
 
   const sheets = [
-    { name: "PO Master", widths: [15, 15, 20, 20, 18, 15, 15, 15, 18, 18, 15, 18, 15], rows: [header(["PO Number", "PO Date", "Vendor Name", "Category", "Total PO Value", "GST Included", "Advance Paid", "Pending Payment", "Payment Status", "Delivery Status", "GRN Available", "Invoice Available", "Audit Status"]), ...poMasterRows], validations: [["F2:F1000", '"Yes,No"'], ["I2:I1000", '"Pending,Partially Paid,Paid"'], ["J2:J1000", '"Pending,Partial,Delivered"'], ["K2:L1000", '"Yes,No"'], ["M2:M1000", '"Open,In Progress,Closed"']] },
-    { name: "Line Item Audit", widths: [15, 30, 10, 12, 15, 15, 15, 18, 18, 18, 12, 18, 22, 22, 15, 25, 15, 18, 18], rows: [header(["PO Number", "Item Name/Description", "Quantity", "Unit Price", "Total Value", "Purchase Type", "Audit Type", "Item Maturity", "Vendor Type", "Purchase Urgency", "Quote Count", "Technical Validation", "Price Benchmark Available", "Backup Vendor Available", "Risk Level", "Action Required", "Price Variance", "Delivery Variance", "Quality Variance"]), ...lineRows], validations: [["F2:F1000", '"First Sourcing,Repeat Sourcing"'], ["G2:G1000", '"First Audit,Re-audit"'], ["H2:H1000", '"Development,Prototype,Production"'], ["I2:I1000", '"New,Existing,Preferred,Conditional"'], ["J2:J1000", '"Normal,Emergency"'], ["L2:L1000", '"Pending,Yes,No,Approved,Failed"'], ["M2:N1000", '"Yes,No"'], ["O2:O1000", '"High,Medium,Low"']] },
-    { name: "Vendor Audit", widths: [20, 22, 15, 20, 20, 15, 20, 25, 15, 15], rows: [header(["Vendor Name", "Price Competitiveness", "Quality", "Delivery Reliability", "Technical Capability", "Responsiveness", "Payment Flexibility", "Documentation Discipline", "Overall Score", "Classification"]), ...vendorRows] },
-    { name: "Money Spent Audit", widths: [15, 20, 18, 15, 18, 18, 15, 18, 15, 15, 18, 18, 18, 18, 18, 18, 18, 18, 20, 20, 25], rows: [header(["PO Number", "Vendor Name", "Invoice Number", "Invoice Date", "Invoice Amount", "Paid Amount", "PO Available", "Invoice Available", "Payment Proof", "GST Correct", "Freight Included", "Extra Charges", "Payment Approval", "Material Received", "GRN Available", "Quantity Ordered", "Quantity Received", "Inspection Passed", "Rejection Quantity", "Status", "Comments"]), ...moneyRows], validations: [["G2:I1000", '"Yes,No"'], ["J2:J1000", '"Yes,No,N/A"'], ["K2:M1000", '"Yes,No"'], ["N2:N1000", '"None,Partial,Full"'], ["O2:O1000", '"Yes,No"'], ["R2:R1000", '"Yes,No"'], ["T2:T1000", '"Clean,Minor Gap,Major Gap,Open,High Risk"']] },
-    { name: "Missing Documents", widths: [15, 20, 20, 15, 30], rows: [header(["PO Number", "Vendor Name", "Document Type", "Status", "Comments"]), ...missingRows], validations: [["D2:D1000", '"Pending,Received,Not Required"']] },
-    { name: "Risk Register", widths: [10, 15, 30, 20, 30, 20, 30, 20, 15, 18, 12], rows: [header(["ID", "Item/PO", "Finding", "Risk", "Evidence", "Impact", "Action", "Owner", "Priority", "Due Date", "Status"]), ...riskRows], validations: [["I2:I1000", '"High,Medium,Low"'], ["K2:K1000", '"Open,In Progress,Closed"']] },
-    { name: "Action Tracker", widths: [12, 30, 20, 15, 18, 15, 25], rows: [header(["Action ID", "Description", "Owner", "Priority", "Due Date", "Status", "Comments"]), ...actionRows], validations: [["D2:D1000", '"High,Medium,Low"'], ["F2:F1000", '"Open,In Progress,Closed"']] },
-    { name: "KPI Summary", widths: [40, 20], rows: kpiRows },
+    { name: "Vendor Master", widths: [26, 20, 20, 20, 28, 16, 16, 12, 18, 20], rows: [header(["Vendor Name", "Category", "Contact Person 1", "Contact Person 2", "Email", "Phone 1", "Phone 2", "Currency", "Source of Supply", "GSTIN"]), ...vendorMasterRows], validations: [["B2:B1000", '"Mechanical,Electrical,Electronics,Fabrication,Raw Material,Tools,Consumables,Services,Other"'], ["H2:H1000", '"INR,USD,EUR,GBP,CNY"']] },
+    { name: "PO Master", widths: [15, 15, 22, 20, 18, 15, 15, 15, 18, 18, 18, 18, 15, 18, 18], rows: [header(["PO Number", "PO Date", "Vendor Name", "Category", "Total PO Value", "GST Included", "Advance Paid", "Balance Paid", "Payment Status", "Expected Delivery Date", "Actual Delivery Date", "Delivery Status", "GRN Available", "Invoice Available", "Audit Status"]), ...poMasterRows], validations: [["F2:F1000", '"Yes,No"'], ["I2:I1000", '"Pending,Partially Paid,Paid"'], ["L2:L1000", '"Pending,Partial,Delivered"'], ["M2:N1000", '"Yes,No"'], ["O2:O1000", '"Pending,In Progress,Completed"']] },
+    { name: "Line Item Audit", widths: [15, 24, 34, 10, 14, 16, 16, 16, 16, 22, 16, 12, 20, 22, 22, 15, 30, 15, 18, 22], rows: [header(["PO Number", "Vendor Name", "Item Name/Description", "Quantity", "Unit Price", "Total Value", "Purchase Type", "Audit Type", "Item Maturity", "Vendor Type", "Purchase Urgency", "Quote Count", "Technical Validation", "Price Benchmark Available", "Backup Vendor Available", "Risk Level", "Action Required", "Price Variance", "Delivery Variance", "Quality Variance"]), ...lineRows], validations: [["G2:G1000", '"Prototype,Production,Consumable,Tooling"'], ["H2:H1000", '"Routine,Technical,Commercial"'], ["I2:I1000", '"Prototype,Alpha,Beta,Production"'], ["J2:J1000", '"OEM,Distributor,Local Manufacturer"'], ["K2:K1000", '"Low,Medium,High,Critical"'], ["M2:M1000", '"Pending,Yes,No,Approved,Failed"'], ["N2:O1000", '"Yes,No"'], ["P2:P1000", '"Low,Medium,High,Critical"']] },
+    { name: "Vendor Audit", widths: [24, 22, 15, 20, 20, 18, 20, 25, 15, 16, 30], rows: [header(["Vendor Name", "Price Competitiveness", "Quality", "Delivery Reliability", "Technical Capability", "Responsiveness", "Payment Flexibility", "Documentation Discipline", "Overall Score", "Classification", "Notes"]), ...vendorRows] },
+    { name: "Money Spent Audit", widths: [15, 22, 18, 15, 18, 15, 15, 18, 20, 18, 18, 18, 18, 16, 16, 18, 18, 15, 18, 18, 18, 18, 30], rows: [header(["PO Number", "Vendor Name", "Invoice Number", "Invoice Date", "Invoice Amount", "Payment Date", "Payment Type", "Paid Amount", "Payment Reference", "Invoice Available", "Payment Proof", "GST Correct", "Freight Included", "Freight Amount", "Extra Charges", "Payment Approval", "Material Received", "GRN Available", "Quantity Ordered", "Quantity Received", "Inspection Passed", "Rejection Quantity", "Comments"]), ...moneyRows], validations: [["G2:G1000", '"Advance,Balance,Final,Refund,Other"'], ["J2:K1000", '"Yes,No"'], ["L2:L1000", '"Pending,Correct,Incorrect,Not Applicable"'], ["M2:M1000", '"Yes,No"'], ["P2:P1000", '"Yes,No"'], ["Q2:Q1000", '"None,Partial,Full"'], ["R2:R1000", '"Yes,No"'], ["U2:U1000", '"Yes,No,Not Captured"']] },
+    { name: "Missing Documents", widths: [15, 22, 22, 18, 36], rows: [header(["PO Number", "Vendor Name", "Document Type", "Status", "Comments"]), ...missingRows], validations: [["D2:D1000", '"Missing,Requested,Received,Verified,Rejected,Not Required"']] },
+    { name: "Risk Register", widths: [10, 15, 30, 20, 30, 20, 30, 20, 15, 18, 12], rows: [header(["ID", "Item/PO", "Finding", "Risk", "Evidence", "Impact", "Action", "Owner", "Priority", "Due Date", "Status"]), ...riskRows], validations: [["I2:I1000", '"Critical,High,Medium,Low"'], ["K2:K1000", '"Open,Mitigated,Closed"']] },
+    { name: "Action Tracker", widths: [12, 34, 20, 15, 18, 15, 32], rows: [header(["Action ID", "Description", "Owner", "Priority", "Due Date", "Status", "Comments"]), ...actionRows], validations: [["D2:D1000", '"Critical,High,Medium,Low"'], ["F2:F1000", '"Open,In Progress,Closed"']] },
+    { name: "KPI Summary", widths: [34, 22, 80], rows: kpiRows },
     { name: "How to Fill", widths: [16, 36, 24, 42, 22, 35, 16, 16], rows: howRows, merges: ["A1:H1", "A3:H3", "A11:H11", "A22:H22", "A31:H31", "A42:H42"] },
   ];
 
@@ -9001,11 +10667,28 @@ function exportProcurementReportXlsx() {
     alert("No procurement data is available to export.");
     return;
   }
+  const blob = buildProcurementReportWorkbook(rows);
+  const link = document.createElement("a");
+  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  link.href = URL.createObjectURL(blob);
+  link.download = `procurement-report-${timestamp}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function exportProcurementAuditXlsx() {
+  const derived = buildDerived();
+  if (!(derived.pos || []).length) {
+    alert("No procurement data is available to export.");
+    return;
+  }
   const blob = buildSourcingAuditWorkbook();
   const link = document.createElement("a");
   const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   link.href = URL.createObjectURL(blob);
-  link.download = `sourcing-money-audit-with-sop-${timestamp}.xlsx`;
+  link.download = `procurement-audit-workbook-${timestamp}.xlsx`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -9099,6 +10782,9 @@ function importLocalState(event) {
         state.activeReservations = Array.isArray(localPayload.activeReservations)
           ? localPayload.activeReservations
           : state.activeReservations;
+        state.procurementAudit = normalizeProcurementAuditState(
+          localPayload.procurementAudit || state.procurementAudit,
+        );
         saveState();
         renderAll();
 
@@ -9136,9 +10822,13 @@ function saveVendorForm(event) {
   state.vendorContacts[vendorName] = {
     vendorName,
     source: cleanText(form.elements.source?.value),
+    vendorCategory: cleanText(form.elements.vendorCategory?.value),
+    currencyCode: cleanText(form.elements.currencyCode?.value || "INR"),
     gstin: cleanText(form.elements.gstin?.value),
     contactPerson: cleanText(form.elements.contactPerson?.value),
+    contactPerson2: cleanText(form.elements.contactPerson2?.value),
     phone: cleanText(form.elements.phone?.value),
+    phone2: cleanText(form.elements.phone2?.value),
     email: cleanText(form.elements.email?.value),
     website: cleanText(form.elements.website?.value),
     city: cleanText(form.elements.city?.value),
@@ -10012,8 +11702,40 @@ function bindGlobalEvents() {
       renderReports(buildDerived());
     });
   document
+    .getElementById("procurementAuditTabs")
+    ?.addEventListener("click", (event) => {
+      const tab = event.target.closest("[data-procurement-audit-tab]");
+      if (!tab) return;
+      state.procurementAuditTab = tab.dataset.procurementAuditTab;
+      renderReports(buildDerived());
+    });
+  document
+    .getElementById("procurementAuditBody")
+    ?.addEventListener("click", handleProcurementAuditTableAction);
+  document
+    .getElementById("addProcurementAuditRecordBtn")
+    ?.addEventListener("click", () => openProcurementAuditModal());
+  document
+    .getElementById("closeProcurementAuditModalBtn")
+    ?.addEventListener("click", closeProcurementAuditModal);
+  document
+    .getElementById("cancelProcurementAuditBtn")
+    ?.addEventListener("click", closeProcurementAuditModal);
+  document
+    .getElementById("procurementAuditModalBackdrop")
+    ?.addEventListener("click", (event) => {
+      if (event.target.id === "procurementAuditModalBackdrop")
+        closeProcurementAuditModal();
+    });
+  document
+    .getElementById("procurementAuditForm")
+    ?.addEventListener("submit", saveProcurementAuditRecord);
+  document
     .getElementById("exportProcurementReportBtn")
     ?.addEventListener("click", exportProcurementReportXlsx);
+  document
+    .getElementById("exportProcurementAuditBtn")
+    ?.addEventListener("click", exportProcurementAuditXlsx);
   document
     .getElementById("exportMechanicalAnalysisBtn")
     ?.addEventListener("click", exportMechanicalAnalysisXlsx);
@@ -10162,6 +11884,9 @@ function bindGlobalEvents() {
   document
     .getElementById("summaryAmountPaidInput")
     ?.addEventListener("change", recalcPoSummary);
+  document
+    .querySelector('#poForm [name="deliveryStatus"]')
+    ?.addEventListener("change", () => syncDeliveredDateField({ stampIfEmpty: true }));
 
   document.getElementById("poForm").addEventListener("submit", (event) => {
     event.preventDefault();
