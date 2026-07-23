@@ -30,6 +30,7 @@
         <button class="tab" data-tab="vendor-metrics">Vendor Metrics</button>
         <button class="tab" data-tab="follow-ups">Follow-ups</button>
         <button class="tab" data-tab="po-availability">PO Availability</button>
+        <button class="tab" data-tab="reports">Reports</button>
       </nav>
 
       <div class="sidebar-help">
@@ -185,7 +186,7 @@
             <button class="po-sort-head" type="button" data-po-sort-key="poTotal" aria-label="Sort by total">Total <span aria-hidden="true"></span></button>
             <button class="po-sort-head" type="button" data-po-sort-key="paymentStatus" aria-label="Sort by payment completion">Payment <span aria-hidden="true"></span></button>
             <button class="po-sort-head" type="button" data-po-sort-key="poStatus" aria-label="Sort by PO status">PO Status <span aria-hidden="true"></span></button>
-            <button class="po-sort-head" type="button" data-po-sort-key="deliveryDate" aria-label="Sort by delivery date">Delivery <span aria-hidden="true"></span></button>
+            <button class="po-sort-head" type="button" data-po-sort-key="deliveryDate" aria-label="Sort by expected delivery date">Expected Delivery <span aria-hidden="true"></span></button>
             <div>Actions</div>
           </div>
 
@@ -304,6 +305,77 @@
       <section class="tab-panel" id="po-availability">
         <div id="poAvailabilityContent"></div>
       </section>
+
+      <section class="tab-panel" id="reports">
+        <div class="tab-page-header">
+          <div>
+            <h1>Reports</h1>
+            <p>Export-ready procurement reporting from the full PO line-item dataset.</p>
+          </div>
+        </div>
+
+        <section class="kpi-grid report-kpi-grid" id="reportKpiGrid"></section>
+
+        <article class="panel report-table-panel hidden" id="procurementReportPanel">
+          <div class="panel-header wrap">
+            <div>
+              <h2>Procurement Report</h2>
+              <p class="section-copy" id="procurementReportSummary">All purchase order item and charge lines.</p>
+            </div>
+            <div class="toolbar">
+              <button class="primary-btn" id="exportProcurementReportBtn" type="button">Export XLSX</button>
+            </div>
+          </div>
+          <div class="table-wrap report-table-wrap">
+            <table class="report-table">
+              <thead id="procurementReportHead"></thead>
+              <tbody id="procurementReportBody"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel report-table-panel hidden" id="mechanicalAnalysisPanel">
+          <div class="panel-header wrap">
+            <div>
+              <h2>Mechanical Procurement Analysis</h2>
+              <p class="section-copy" id="mechanicalAnalysisSummary">Mechanical sourcing analysis from current PO data.</p>
+            </div>
+            <div class="toolbar">
+              <button class="primary-btn" id="exportMechanicalAnalysisBtn" type="button">Export Mechanical XLSX</button>
+            </div>
+          </div>
+          <section class="mechanical-dashboard-grid" id="mechanicalDashboardGrid"></section>
+          <div class="report-tab-strip" id="mechanicalAnalysisTabs"></div>
+          <div class="table-wrap report-table-wrap mechanical-table-wrap">
+            <table class="report-table mechanical-report-table">
+              <thead id="mechanicalAnalysisHead"></thead>
+              <tbody id="mechanicalAnalysisBody"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel report-table-panel hidden" id="procurementAuditPanel">
+          <div class="panel-header wrap">
+            <div>
+              <h2>Procurement Audit Workspace</h2>
+              <p class="section-copy" id="procurementAuditSummary">Evidence-based procurement, payment, receipt, risk, and action records.</p>
+            </div>
+            <div class="toolbar">
+              <button class="ghost-btn" id="addProcurementAuditRecordBtn" type="button">Add Record</button>
+              <button class="primary-btn" id="exportProcurementAuditBtn" type="button">Export Audit XLSX</button>
+            </div>
+          </div>
+          <section class="audit-dashboard-grid" id="procurementAuditDashboard"></section>
+          <div class="report-tab-strip audit-tab-strip" id="procurementAuditTabs"></div>
+          <div class="audit-coverage-note" id="procurementAuditCoverage"></div>
+          <div class="table-wrap report-table-wrap audit-table-wrap">
+            <table class="report-table audit-report-table">
+              <thead id="procurementAuditHead"></thead>
+              <tbody id="procurementAuditBody"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
       </main>
     </div>
   </div>
@@ -350,8 +422,12 @@
             </select>
           </label>
           <label class="field">
-            <span>Delivery Date</span>
+            <span>Expected Delivery Date</span>
             <input class="control-input" type="date" name="deliveryDate" />
+          </label>
+          <label class="field hidden" id="deliveredDateField">
+            <span>Delivered Date</span>
+            <input class="control-input" type="date" name="deliveredDate" readonly />
           </label>
           <label class="field hidden" id="eddField">
             <span class="field-label-inline">EDD <span class="info-icon" title="Revised Estimated Delivery Date">i</span></span>
@@ -445,6 +521,26 @@
         <div class="form-actions">
           <button type="button" class="ghost-btn" id="cancelPoBtn">Cancel</button>
           <button type="submit" class="primary-btn" id="savePoBtn">Save Purchase Order</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="procurementAuditModalBackdrop">
+    <div class="modal-shell modal-medium audit-record-modal">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">PROCUREMENT AUDIT</p>
+          <h3 id="procurementAuditModalTitle">Add Audit Record</h3>
+          <p class="section-copy" id="procurementAuditModalSubtext">Record only verified procurement evidence.</p>
+        </div>
+        <button class="icon-btn" id="closeProcurementAuditModalBtn" type="button" aria-label="Close">&times;</button>
+      </div>
+      <form id="procurementAuditForm" class="modal-form">
+        <div class="form-grid" id="procurementAuditFormFields"></div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="cancelProcurementAuditBtn" type="button">Cancel</button>
+          <button class="primary-btn" type="submit">Save Record</button>
         </div>
       </form>
     </div>
