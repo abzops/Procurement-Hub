@@ -9,6 +9,8 @@ const STORAGE_KEYS = {
   poMaster: "sns-po-master-v1",
   activeReservations: "sns-active-po-reservations-v1",
   procurementAudit: "sns-procurement-audit-v1",
+  products: "sns-products-v1",
+  productAliases: "sns-product-aliases-v1",
 };
 
 let baseRows = Array.isArray(window.STACKNSTOCK_DATA?.rows)
@@ -17,6 +19,18 @@ let baseRows = Array.isArray(window.STACKNSTOCK_DATA?.rows)
 let vendorSeeds = Array.isArray(window.STACKNSTOCK_DATA?.vendorSeeds)
   ? window.STACKNSTOCK_DATA.vendorSeeds
   : [];
+
+const PRODUCT_MASTER_COLUMNS = [
+  { key: "productCode", label: "Product Code" },
+  { key: "productName", label: "Product Name" },
+  { key: "category", label: "Category" },
+  { key: "brand", label: "Brand / Make" },
+  { key: "manufacturerPartNo", label: "Part #" },
+  { key: "defaultUom", label: "UOM" },
+  { key: "defaultTaxPercent", label: "Tax %" },
+  { key: "status", label: "Status" },
+  { key: "actions", label: "Actions" },
+];
 
 const PRODUCT_SORTS = [
   { value: "totalSpend-desc", label: "Sort: Highest Spend" },
@@ -631,6 +645,14 @@ const state = {
   procurementAudit: normalizeProcurementAuditState(
     loadJson(STORAGE_KEYS.procurementAudit, {}),
   ),
+  products: loadJson(STORAGE_KEYS.products, []),
+  productAliases: loadJson(STORAGE_KEYS.productAliases, []),
+  productsSubTab: "master",
+  selectedMasterProductId: null,
+  selectedMasterDetailTab: "overview",
+  authSession: null,
+  isAuthenticatedUser: false,
+  productMasterCanWrite: false,
   activeTab: "overview",
   selectedVendor: null,
   selectedMetricProduct: null,
@@ -649,6 +671,9 @@ const state = {
     poStatus: "all",
     poDelivery: "all",
     poSort: "poDate-desc",
+    productMasterSearch: "",
+    productMasterCategory: "all",
+    productMasterStatus: "Active",
     productSearch: "",
     productSort: "totalSpend-desc",
     vendorSearch: "",
@@ -1717,6 +1742,7 @@ async function loadRemoteStateFromSupabase() {
   });
   await loadProcurementAuditFromSupabase();
   await loadPoAvailabilityFromSupabase();
+  await loadProductsFromSupabase();
   return true;
 }
 
@@ -2093,6 +2119,163 @@ async function deleteProcurementAuditRecordFromSupabase(collection, id) {
     console.warn("Audit record was deleted locally but not from Supabase.", error);
 }
 
+function isProductMasterAuth() {
+  return Boolean(state.productMasterCanWrite);
+}
+
+async function checkSupabaseAuthSession() {
+  state.authSession = null;
+  state.isAuthenticatedUser = false;
+  state.productMasterCanWrite = false;
+
+  if (useSupabase && supabaseClient?.auth) {
+    try {
+      const { data } = await supabaseClient.auth.getSession();
+      state.authSession = data?.session || null;
+      state.isAuthenticatedUser = Boolean(data?.session?.user);
+
+      if (state.isAuthenticatedUser && supabaseClient.rpc) {
+        const { data: isAdmin, error } = await supabaseClient.rpc("is_procurement_admin");
+        state.productMasterCanWrite = !error && Boolean(isAdmin);
+      }
+    } catch (err) {
+      state.authSession = null;
+      state.isAuthenticatedUser = false;
+      state.productMasterCanWrite = false;
+    }
+  } else {
+    state.authSession = null;
+    state.isAuthenticatedUser = false;
+    state.productMasterCanWrite = false;
+  }
+}
+
+async function loadProductsFromSupabase() {
+  if (!useSupabase) return false;
+  await checkSupabaseAuthSession();
+  try {
+    const [productsRes, aliasesRes] = await Promise.all([
+      supabaseClient
+        .from("products")
+        .select("*")
+        .order("product_code", { ascending: true }),
+      supabaseClient
+        .from("product_aliases")
+        .select("*")
+        .order("created_at", { ascending: true }),
+    ]);
+
+    if (productsRes.error && !isOptionalSupabaseTableError(productsRes.error)) {
+      console.warn("Products table could not be loaded from Supabase", productsRes.error);
+    } else if (!productsRes.error && Array.isArray(productsRes.data)) {
+      state.products = productsRes.data.map((p) => ({
+        productId: p.product_id,
+        productCode: p.product_code,
+        productName: p.product_name,
+        normalizedName: p.normalized_name,
+        category: p.category || "",
+        subcategory: p.subcategory || "",
+        brand: p.brand || "",
+        manufacturerPartNo: p.manufacturer_part_no || "",
+        specification: p.specification || "",
+        defaultUom: p.default_uom || "Nos",
+        hsnCode: p.hsn_code || "",
+        defaultTaxPercent: Number(p.default_tax_percent ?? 18),
+        defaultMaterialType: p.default_material_type || "Unknown",
+        status: p.status || "Active",
+        notes: p.notes || "",
+        createdAt: p.created_at,
+        updatedAt: p.updated_at,
+      }));
+      localStorage.setItem(STORAGE_KEYS.products, JSON.stringify(state.products));
+    }
+
+    if (aliasesRes.error && !isOptionalSupabaseTableError(aliasesRes.error)) {
+      console.warn("Product aliases table could not be loaded from Supabase", aliasesRes.error);
+    } else if (!aliasesRes.error && Array.isArray(aliasesRes.data)) {
+      state.productAliases = aliasesRes.data.map((a) => ({
+        aliasId: a.alias_id,
+        productId: a.product_id,
+        aliasText: a.alias_text,
+        normalizedAlias: a.normalized_alias,
+        source: a.source || "Manual",
+        notes: a.notes || "",
+        createdAt: a.created_at,
+        updatedAt: a.updated_at,
+      }));
+      localStorage.setItem(STORAGE_KEYS.productAliases, JSON.stringify(state.productAliases));
+    }
+    return true;
+  } catch (err) {
+    console.warn("loadProductsFromSupabase error", err);
+    return false;
+  }
+}
+
+async function syncProductsToSupabase() {
+  if (!useSupabase) return false;
+  try {
+    if (state.products && state.products.length) {
+      const productsPayload = dedupeRecordsByKey(
+        state.products.map((p) => ({
+          product_id: p.productId || p.product_id,
+          product_code: p.productCode || p.product_code,
+          product_name: cleanText(p.productName || p.product_name),
+          category: cleanText(p.category || p.category) || null,
+          subcategory: cleanText(p.subcategory || p.subcategory) || null,
+          brand: cleanText(p.brand || p.brand) || null,
+          manufacturer_part_no: cleanText(p.manufacturerPartNo || p.manufacturer_part_no) || null,
+          specification: cleanText(p.specification || p.specification) || null,
+          default_uom: cleanText(p.defaultUom || p.default_uom || "Nos") || "Nos",
+          hsn_code: cleanText(p.hsnCode || p.hsn_code) || null,
+          default_tax_percent: p.defaultTaxPercent != null ? Number(p.defaultTaxPercent) : 18.0,
+          default_material_type: cleanText(p.defaultMaterialType || p.default_material_type || "Unknown") || "Unknown",
+          status: p.status === "Inactive" ? "Inactive" : "Active",
+          notes: cleanText(p.notes || p.notes) || null,
+        })).filter((p) => p.product_id && p.product_name),
+        "product_id",
+      );
+
+      if (productsPayload.length) {
+        await upsertSupabaseWithOptionalColumns(
+          "products",
+          productsPayload,
+          { onConflict: "product_id" },
+          ["subcategory", "specification", "notes"],
+        );
+      }
+    }
+
+    if (state.productAliases && state.productAliases.length) {
+      const aliasesPayload = dedupeRecordsByKey(
+        state.productAliases.map((a) => ({
+          alias_id: a.aliasId || a.alias_id,
+          product_id: a.productId || a.product_id,
+          alias_text: cleanText(a.aliasText || a.alias_text),
+          source: cleanText(a.source || a.source || "Manual") || "Manual",
+          notes: cleanText(a.notes || a.notes) || null,
+        })).filter((a) => a.alias_id && a.product_id && a.alias_text),
+        "alias_id",
+      );
+
+      if (aliasesPayload.length) {
+        await upsertSupabaseWithOptionalColumns(
+          "product_aliases",
+          aliasesPayload,
+          { onConflict: "alias_id" },
+          ["notes"],
+        );
+      }
+    }
+    return true;
+  } catch (err) {
+    if (!isOptionalSupabaseTableError(err)) {
+      console.warn("syncProductsToSupabase error", err);
+    }
+    return false;
+  }
+}
+
 async function syncStateToSupabase() {
   if (!useSupabase || remoteSyncInFlight) return;
   remoteSyncInFlight = true;
@@ -2292,6 +2475,7 @@ async function syncStateToSupabase() {
       if (error) throw error;
     }
 
+    await syncProductsToSupabase();
     await generateFollowupsForPOs(derived.pos);
     await syncPoAvailabilityToSupabase();
     await loadRemoteStateFromSupabase();
@@ -2392,6 +2576,14 @@ function saveState() {
   localStorage.setItem(
     STORAGE_KEYS.procurementAudit,
     JSON.stringify(state.procurementAudit),
+  );
+  localStorage.setItem(
+    STORAGE_KEYS.products,
+    JSON.stringify(state.products || []),
+  );
+  localStorage.setItem(
+    STORAGE_KEYS.productAliases,
+    JSON.stringify(state.productAliases || []),
   );
   scheduleRemoteSync();
 }
@@ -7142,6 +7334,683 @@ function renderProducts({ products }) {
     `<tr><td colspan="8" class="empty-state">No products found.</td></tr>`;
 }
 
+function renderProductMaster() {
+  const tableHead = document.getElementById("productMasterTableHead");
+  const tableBody = document.getElementById("productMasterTableBody");
+  const categoryFilter = document.getElementById("productMasterCategoryFilter");
+  const statusFilter = document.getElementById("productMasterStatusFilter");
+  const searchInput = document.getElementById("productMasterSearch");
+  const readonlyNotice = document.getElementById("productMasterReadonlyNotice");
+  const addBtn = document.getElementById("openAddProductMasterBtn");
+
+  if (!tableHead || !tableBody) return;
+
+  const isAuth = isProductMasterAuth();
+
+  if (readonlyNotice) {
+    readonlyNotice.classList.toggle("hidden", isAuth);
+  }
+
+  if (addBtn) {
+    if (isAuth) {
+      addBtn.removeAttribute("disabled");
+      addBtn.removeAttribute("title");
+    } else {
+      addBtn.setAttribute("disabled", "true");
+      addBtn.setAttribute("title", "Product Master is read-only. Administrator access is required to make changes.");
+    }
+  }
+
+  if (categoryFilter) {
+    const categories = Array.from(
+      new Set(
+        (state.products || [])
+          .map((p) => cleanText(p.category))
+          .filter(Boolean),
+      ),
+    ).sort();
+    const currentCategory = state.filters.productMasterCategory || "all";
+    categoryFilter.innerHTML =
+      `<option value="all">All Categories</option>` +
+      categories
+        .map(
+          (cat) =>
+            `<option value="${escapeHtml(cat)}" ${cat === currentCategory ? "selected" : ""}>${escapeHtml(cat)}</option>`,
+        )
+        .join("");
+  }
+
+  if (statusFilter) {
+    statusFilter.value = state.filters.productMasterStatus || "all";
+  }
+  if (searchInput && searchInput.value !== (state.filters.productMasterSearch || "")) {
+    searchInput.value = state.filters.productMasterSearch || "";
+  }
+
+  const query = (state.filters.productMasterSearch || "").toLowerCase().trim();
+  const selectedCat = state.filters.productMasterCategory || "all";
+  const selectedStatus = state.filters.productMasterStatus || "all";
+
+  let filtered = (state.products || []).filter((p) => {
+    if (selectedStatus !== "all" && (p.status || "Active") !== selectedStatus) return false;
+    if (selectedCat !== "all" && cleanText(p.category) !== selectedCat) return false;
+    if (query) {
+      const searchBlob = `${p.productCode || ""} ${p.productName || ""} ${p.category || ""} ${p.brand || ""} ${p.manufacturerPartNo || ""} ${p.specification || ""}`.toLowerCase();
+      if (!searchBlob.includes(query)) return false;
+    }
+    return true;
+  });
+
+  renderTableHead("productMasterTableHead", PRODUCT_MASTER_COLUMNS);
+
+  if (!filtered.length) {
+    tableBody.innerHTML = `<tr><td colspan="9" class="empty-state">No master products found matching the criteria.</td></tr>`;
+    return;
+  }
+
+  tableBody.innerHTML = filtered
+    .map((p) => {
+      const statusClass = (p.status || "Active") === "Active" ? "status-active" : "status-inactive";
+      const actionButtons = isAuth
+        ? `
+            <button class="ghost-btn small-btn" data-product-master-action="details" data-product-id="${escapeHtml(p.productId)}" type="button">Details</button>
+            <button class="ghost-btn small-btn" data-product-master-action="edit" data-product-id="${escapeHtml(p.productId)}" type="button">Edit</button>
+            <button class="ghost-btn small-btn" data-product-master-action="toggle-status" data-product-id="${escapeHtml(p.productId)}" type="button">${p.status === "Inactive" ? "Reactivate" : "Deactivate"}</button>
+          `
+        : `
+            <button class="ghost-btn small-btn" data-product-master-action="details" data-product-id="${escapeHtml(p.productId)}" type="button">Details</button>
+          `;
+
+      return `
+        <tr class="row-selectable" data-product-id="${escapeHtml(p.productId)}">
+          <td><span class="product-code-tag">${escapeHtml(p.productCode || "—")}</span></td>
+          <td><strong>${escapeHtml(p.productName)}</strong></td>
+          <td>${escapeHtml(p.category || "—")}</td>
+          <td>${escapeHtml(p.brand || "—")}</td>
+          <td>${escapeHtml(p.manufacturerPartNo || "—")}</td>
+          <td>${escapeHtml(p.defaultUom || "Nos")}</td>
+          <td>${p.defaultTaxPercent != null ? `${p.defaultTaxPercent}%` : "18%"}</td>
+          <td><span class="badge ${statusClass}">${escapeHtml(p.status || "Active")}</span></td>
+          <td>
+            <div class="action-stack" style="flex-direction:row;gap:6px;min-width:${isAuth ? "210px" : "90px"};">
+              ${actionButtons}
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderProductsWorkspace(derived) {
+  const masterSubTabBtn = document.querySelector('[data-products-subtab="master"]');
+  const histSubTabBtn = document.querySelector('[data-products-subtab="historical"]');
+  const masterPanel = document.getElementById("productMasterSubPanel");
+  const histPanel = document.getElementById("historicalProductsSubPanel");
+
+  const isMaster = state.productsSubTab === "master";
+
+  if (masterSubTabBtn) masterSubTabBtn.classList.toggle("active", isMaster);
+  if (histSubTabBtn) histSubTabBtn.classList.toggle("active", !isMaster);
+  if (masterPanel) masterPanel.classList.toggle("hidden", !isMaster);
+  if (histPanel) histPanel.classList.toggle("hidden", isMaster);
+
+  renderProductMaster();
+  renderProducts(derived);
+}
+
+function openProductMasterModal(product = null) {
+  if (!isProductMasterAuth()) {
+    alert("Product Master is read-only. Administrator access is required to make changes.");
+    return;
+  }
+
+  const modal = document.getElementById("productMasterModalBackdrop");
+  const form = document.getElementById("productMasterForm");
+  const title = document.getElementById("productMasterModalTitle");
+  const subtext = document.getElementById("productMasterModalSubtext");
+  if (!modal || !form) return;
+
+  form.reset();
+
+  if (product) {
+    title.textContent = `Edit ${product.productCode || "Product"}`;
+    subtext.textContent = `Update canonical specifications and attributes for ${product.productName}.`;
+    form.elements.productId.value = product.productId || "";
+    form.elements.productCode.value = product.productCode || "";
+    form.elements.status.value = product.status || "Active";
+    form.elements.productName.value = product.productName || "";
+    form.elements.category.value = product.category || "";
+    form.elements.subcategory.value = product.subcategory || "";
+    form.elements.brand.value = product.brand || "";
+    form.elements.manufacturerPartNo.value = product.manufacturerPartNo || "";
+    form.elements.defaultUom.value = product.defaultUom || "Nos";
+    form.elements.hsnCode.value = product.hsnCode || "";
+    form.elements.defaultTaxPercent.value = product.defaultTaxPercent ?? 18;
+    form.elements.defaultMaterialType.value = product.defaultMaterialType || "Unknown";
+    form.elements.specification.value = product.specification || "";
+    form.elements.notes.value = product.notes || "";
+  } else {
+    title.textContent = "Add Master Product";
+    subtext.textContent = "Define canonical product identity, specifications, and default attributes.";
+    form.elements.productId.value = "";
+    form.elements.productCode.value = "Generated on save";
+    form.elements.status.value = "Active";
+    form.elements.defaultUom.value = "Nos";
+    form.elements.defaultTaxPercent.value = "18";
+    form.elements.defaultMaterialType.value = "Unknown";
+  }
+
+  modal.classList.remove("hidden");
+}
+
+function closeProductMasterModal() {
+  const modal = document.getElementById("productMasterModalBackdrop");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function createProduct(payload) {
+  if (!isProductMasterAuth()) {
+    alert("Product Master is read-only. Administrator access is required to make changes.");
+    return null;
+  }
+
+  const dbPayload = {
+    product_name: cleanText(payload.productName),
+    category: cleanText(payload.category) || null,
+    subcategory: cleanText(payload.subcategory) || null,
+    brand: cleanText(payload.brand) || null,
+    manufacturer_part_no: cleanText(payload.manufacturerPartNo) || null,
+    specification: cleanText(payload.specification) || null,
+    default_uom: cleanText(payload.defaultUom || "Nos") || "Nos",
+    hsn_code: cleanText(payload.hsnCode) || null,
+    default_tax_percent: payload.defaultTaxPercent != null ? Number(payload.defaultTaxPercent) : 18.0,
+    default_material_type: cleanText(payload.defaultMaterialType || "Unknown") || "Unknown",
+    status: payload.status === "Inactive" ? "Inactive" : "Active",
+    notes: cleanText(payload.notes) || null,
+  };
+
+  if (useSupabase) {
+    const { data, error } = await supabaseClient
+      .from("products")
+      .insert(dbPayload)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Failed to create product in Supabase", error);
+      alert(`Failed to create product: ${error.message || error}`);
+      return null;
+    }
+
+    const newProduct = {
+      productId: data.product_id,
+      productCode: data.product_code,
+      productName: data.product_name,
+      normalizedName: data.normalized_name,
+      category: data.category || "",
+      subcategory: data.subcategory || "",
+      brand: data.brand || "",
+      manufacturerPartNo: data.manufacturer_part_no || "",
+      specification: data.specification || "",
+      defaultUom: data.default_uom || "Nos",
+      hsnCode: data.hsn_code || "",
+      defaultTaxPercent: Number(data.default_tax_percent ?? 18),
+      defaultMaterialType: data.default_material_type || "Unknown",
+      status: data.status || "Active",
+      notes: data.notes || "",
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+    };
+    state.products = [...(state.products || []), newProduct];
+    saveState();
+    return newProduct;
+  } else {
+    const fallbackId = uid("PRD");
+    const fallbackCode = `SNS-P-${String((state.products || []).length + 1).padStart(5, "0")}`;
+    const newProduct = {
+      productId: fallbackId,
+      productCode: fallbackCode,
+      productName: dbPayload.product_name,
+      normalizedName: dbPayload.product_name.toLowerCase(),
+      category: dbPayload.category || "",
+      subcategory: dbPayload.subcategory || "",
+      brand: dbPayload.brand || "",
+      manufacturerPartNo: dbPayload.manufacturer_part_no || "",
+      specification: dbPayload.specification || "",
+      defaultUom: dbPayload.default_uom,
+      hsnCode: dbPayload.hsn_code || "",
+      defaultTaxPercent: dbPayload.default_tax_percent,
+      defaultMaterialType: dbPayload.default_material_type,
+      status: dbPayload.status,
+      notes: dbPayload.notes || "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    state.products = [...(state.products || []), newProduct];
+    saveState();
+    return newProduct;
+  }
+}
+
+async function updateProduct(productId, payload) {
+  if (!isProductMasterAuth()) {
+    alert("Product Master is read-only. Administrator access is required to make changes.");
+    return null;
+  }
+
+  const dbPayload = {
+    product_name: cleanText(payload.productName),
+    category: cleanText(payload.category) || null,
+    subcategory: cleanText(payload.subcategory) || null,
+    brand: cleanText(payload.brand) || null,
+    manufacturer_part_no: cleanText(payload.manufacturerPartNo) || null,
+    specification: cleanText(payload.specification) || null,
+    default_uom: cleanText(payload.defaultUom || "Nos") || "Nos",
+    hsn_code: cleanText(payload.hsnCode) || null,
+    default_tax_percent: payload.defaultTaxPercent != null ? Number(payload.defaultTaxPercent) : 18.0,
+    default_material_type: cleanText(payload.defaultMaterialType || "Unknown") || "Unknown",
+    status: payload.status === "Inactive" ? "Inactive" : "Active",
+    notes: cleanText(payload.notes) || null,
+  };
+
+  if (useSupabase) {
+    const { data, error } = await supabaseClient
+      .from("products")
+      .update(dbPayload)
+      .eq("product_id", productId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Failed to update product in Supabase", error);
+      alert(`Failed to update product: ${error.message || error}`);
+      return null;
+    }
+
+    const idx = (state.products || []).findIndex((p) => p.productId === productId);
+    if (idx !== -1) {
+      state.products[idx] = {
+        ...state.products[idx],
+        productName: data.product_name,
+        normalizedName: data.normalized_name,
+        category: data.category || "",
+        subcategory: data.subcategory || "",
+        brand: data.brand || "",
+        manufacturerPartNo: data.manufacturer_part_no || "",
+        specification: data.specification || "",
+        defaultUom: data.default_uom || "Nos",
+        hsnCode: data.hsn_code || "",
+        defaultTaxPercent: Number(data.default_tax_percent ?? 18),
+        defaultMaterialType: data.default_material_type || "Unknown",
+        status: data.status || "Active",
+        notes: data.notes || "",
+        updatedAt: data.updated_at,
+      };
+      saveState();
+    }
+    return state.products[idx];
+  } else {
+    const idx = (state.products || []).findIndex((p) => p.productId === productId);
+    if (idx !== -1) {
+      state.products[idx] = {
+        ...state.products[idx],
+        productName: dbPayload.product_name,
+        normalizedName: dbPayload.product_name.toLowerCase(),
+        category: dbPayload.category || "",
+        subcategory: dbPayload.subcategory || "",
+        brand: dbPayload.brand || "",
+        manufacturerPartNo: dbPayload.manufacturer_part_no || "",
+        specification: dbPayload.specification || "",
+        defaultUom: dbPayload.default_uom,
+        hsnCode: dbPayload.hsn_code || "",
+        defaultTaxPercent: dbPayload.default_tax_percent,
+        defaultMaterialType: dbPayload.default_material_type,
+        status: dbPayload.status,
+        notes: dbPayload.notes || "",
+        updatedAt: new Date().toISOString(),
+      };
+      saveState();
+    }
+    return state.products[idx];
+  }
+}
+
+async function saveProductMasterForm(event) {
+  if (event) event.preventDefault();
+  if (!isProductMasterAuth()) {
+    alert("Product Master is read-only. Administrator access is required to make changes.");
+    return;
+  }
+
+  const form = document.getElementById("productMasterForm");
+  if (!form) return;
+
+  const productId = form.elements.productId.value;
+  const productName = cleanText(form.elements.productName.value);
+  if (!productName) {
+    alert("Product Name is required.");
+    return;
+  }
+
+  const taxPercentVal = parseFloat(form.elements.defaultTaxPercent.value);
+  const defaultTaxPercent = isNaN(taxPercentVal) ? 18 : Math.max(0, Math.min(100, taxPercentVal));
+
+  const payload = {
+    productName,
+    category: cleanText(form.elements.category.value),
+    subcategory: cleanText(form.elements.subcategory.value),
+    brand: cleanText(form.elements.brand.value),
+    manufacturerPartNo: cleanText(form.elements.manufacturerPartNo.value),
+    defaultUom: cleanText(form.elements.defaultUom.value) || "Nos",
+    hsnCode: cleanText(form.elements.hsnCode.value),
+    defaultTaxPercent,
+    defaultMaterialType: cleanText(form.elements.defaultMaterialType.value) || "Unknown",
+    status: form.elements.status.value === "Inactive" ? "Inactive" : "Active",
+    specification: cleanText(form.elements.specification.value),
+    notes: cleanText(form.elements.notes.value),
+  };
+
+  if (!productId) {
+    // Duplicate warning before creation
+    const normName = productName.toLowerCase();
+    const rawPartNo = payload.manufacturerPartNo;
+    const normPartNo = rawPartNo ? rawPartNo.toLowerCase() : "";
+
+    const duplicateName = (state.products || []).find(
+      (p) => (p.normalizedName || p.productName.toLowerCase()) === normName,
+    );
+    const duplicatePartNo = rawPartNo
+      ? (state.products || []).find(
+          (p) => p.manufacturerPartNo && p.manufacturerPartNo.toLowerCase() === normPartNo,
+        )
+      : null;
+
+    if (duplicateName || duplicatePartNo) {
+      const match = duplicateName || duplicatePartNo;
+      const reason = duplicateName ? `name "${productName}"` : `part number "${rawPartNo}"`;
+      const proceed = confirm(
+        `Warning: A product with matching ${reason} already exists in the catalog (${match.productCode}: ${match.productName}).\n\nDo you want to proceed and create this product anyway?`,
+      );
+      if (!proceed) return;
+    }
+
+    const created = await createProduct(payload);
+    if (created) {
+      closeProductMasterModal();
+      renderAll();
+    }
+  } else {
+    const updated = await updateProduct(productId, payload);
+    if (updated) {
+      closeProductMasterModal();
+      renderAll();
+    }
+  }
+}
+
+async function toggleProductStatus(productId) {
+  if (!isProductMasterAuth()) {
+    alert("Product Master is read-only. Administrator access is required to make changes.");
+    return;
+  }
+
+  const product = (state.products || []).find((p) => p.productId === productId);
+  if (!product) return;
+  const nextStatus = product.status === "Active" ? "Inactive" : "Active";
+
+  if (useSupabase) {
+    const { data, error } = await supabaseClient
+      .from("products")
+      .update({ status: nextStatus })
+      .eq("product_id", productId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Failed to toggle product status in Supabase", error);
+      alert(`Failed to change product status: ${error.message || error}`);
+      return;
+    }
+    product.status = data.status;
+    product.updatedAt = data.updated_at;
+  } else {
+    product.status = nextStatus;
+    product.updatedAt = new Date().toISOString();
+  }
+  saveState();
+  renderAll();
+}
+
+function openProductMasterDetailModal(productId) {
+  const modal = document.getElementById("productMasterDetailModalBackdrop");
+  const product = (state.products || []).find((p) => p.productId === productId);
+  if (!modal || !product) return;
+
+  state.selectedMasterProductId = productId;
+  state.selectedMasterDetailTab = "overview";
+
+  document.getElementById("productMasterDetailTitle").textContent = product.productName;
+  document.getElementById("productMasterDetailCode").textContent = `${product.productCode} • ${product.status}`;
+
+  const aliasProductIdInput = document.getElementById("aliasProductId");
+  if (aliasProductIdInput) aliasProductIdInput.value = productId;
+
+  renderProductMasterDetailContent(product);
+  modal.classList.remove("hidden");
+}
+
+function closeProductMasterDetailModal() {
+  const modal = document.getElementById("productMasterDetailModalBackdrop");
+  if (modal) modal.classList.add("hidden");
+}
+
+function renderProductMasterDetailContent(product) {
+  const overviewMount = document.getElementById("productDetailOverviewContent");
+  const aliasesMount = document.getElementById("aliasChipsList");
+  const aliasCountBadge = document.getElementById("aliasCountBadge");
+  const overviewTabBtn = document.getElementById("pDetailTabOverview");
+  const aliasesTabBtn = document.getElementById("pDetailTabAliases");
+  const overviewSec = document.getElementById("productDetailOverviewSection");
+  const aliasesSec = document.getElementById("productDetailAliasesSection");
+  const aliasNotice = document.getElementById("aliasReadonlyNotice");
+  const addAliasForm = document.getElementById("addAliasForm");
+
+  const isOverview = state.selectedMasterDetailTab === "overview";
+  if (overviewTabBtn) overviewTabBtn.classList.toggle("active", isOverview);
+  if (aliasesTabBtn) aliasesTabBtn.classList.toggle("active", !isOverview);
+  if (overviewSec) overviewSec.classList.toggle("hidden", !isOverview);
+  if (aliasesSec) aliasesSec.classList.toggle("hidden", isOverview);
+
+  const isAuth = isProductMasterAuth();
+  if (aliasNotice) aliasNotice.classList.toggle("hidden", isAuth);
+  if (addAliasForm) addAliasForm.classList.toggle("hidden", !isAuth);
+
+  if (overviewMount) {
+    overviewMount.innerHTML = `
+      <div class="product-overview-grid">
+        <div class="product-overview-cell">
+          <span>Product Code</span>
+          <strong>${escapeHtml(product.productCode)}</strong>
+        </div>
+        <div class="product-overview-cell">
+          <span>Status</span>
+          <strong><span class="badge ${(product.status || "Active") === "Active" ? "status-active" : "status-inactive"}">${escapeHtml(product.status || "Active")}</span></strong>
+        </div>
+        <div class="product-overview-cell">
+          <span>Category</span>
+          <strong>${escapeHtml(product.category || "—")}</strong>
+        </div>
+        <div class="product-overview-cell">
+          <span>Subcategory</span>
+          <strong>${escapeHtml(product.subcategory || "—")}</strong>
+        </div>
+        <div class="product-overview-cell">
+          <span>Brand / Make</span>
+          <strong>${escapeHtml(product.brand || "—")}</strong>
+        </div>
+        <div class="product-overview-cell">
+          <span>Part Number</span>
+          <strong>${escapeHtml(product.manufacturerPartNo || "—")}</strong>
+        </div>
+        <div class="product-overview-cell">
+          <span>Default UOM</span>
+          <strong>${escapeHtml(product.defaultUom || "Nos")}</strong>
+        </div>
+        <div class="product-overview-cell">
+          <span>Default Tax %</span>
+          <strong>${product.defaultTaxPercent != null ? `${product.defaultTaxPercent}%` : "18%"}</strong>
+        </div>
+        <div class="product-overview-cell">
+          <span>HSN Code</span>
+          <strong>${escapeHtml(product.hsnCode || "—")}</strong>
+        </div>
+        <div class="product-overview-cell">
+          <span>Material Type</span>
+          <strong>${escapeHtml(product.defaultMaterialType || "Unknown")}</strong>
+        </div>
+        ${product.specification ? `
+          <div class="product-overview-cell full-width">
+            <span>Specification</span>
+            <strong>${escapeHtml(product.specification)}</strong>
+          </div>
+        ` : ""}
+        ${product.notes ? `
+          <div class="product-overview-cell full-width">
+            <span>Notes</span>
+            <strong>${escapeHtml(product.notes)}</strong>
+          </div>
+        ` : ""}
+      </div>
+    `;
+  }
+
+  const aliases = (state.productAliases || []).filter((a) => a.productId === product.productId);
+  if (aliasCountBadge) aliasCountBadge.textContent = String(aliases.length);
+
+  if (aliasesMount) {
+    if (!aliases.length) {
+      aliasesMount.innerHTML = `<div class="empty-state" style="padding:12px;font-size:12px;">No aliases mapped yet for this product.${isAuth ? " Add one above." : ""}</div>`;
+    } else {
+      aliasesMount.innerHTML = aliases
+        .map(
+          (a) => `
+        <div class="alias-chip">
+          <span>${escapeHtml(a.aliasText)}</span>
+          ${isAuth ? `<button type="button" class="remove-alias-btn" data-alias-id="${escapeHtml(a.aliasId)}" title="Remove alias">&times;</button>` : ""}
+        </div>
+      `,
+        )
+        .join("");
+    }
+  }
+}
+
+async function addAliasToProduct(productId, aliasText) {
+  if (!isProductMasterAuth()) {
+    alert("Product Master is read-only. Administrator access is required to make changes.");
+    return;
+  }
+
+  const text = cleanText(aliasText);
+  if (!text) return;
+  const normalized = text.toLowerCase();
+
+  const existingGlobal = (state.productAliases || []).find(
+    (a) => (a.normalizedAlias || a.aliasText.toLowerCase()) === normalized,
+  );
+  if (existingGlobal) {
+    if (existingGlobal.productId === productId) {
+      alert(`The alias "${text}" is already mapped to this product.`);
+    } else {
+      const parentProduct = (state.products || []).find((p) => p.productId === existingGlobal.productId);
+      const parentName = parentProduct ? `${parentProduct.productCode} (${parentProduct.productName})` : "another product";
+      alert(`The alias "${text}" is already mapped to ${parentName}. Aliases must be unique across all products.`);
+    }
+    return;
+  }
+
+  const dbPayload = {
+    product_id: productId,
+    alias_text: text,
+    source: "Manual",
+    notes: null,
+  };
+
+  if (useSupabase) {
+    const { data, error } = await supabaseClient
+      .from("product_aliases")
+      .insert(dbPayload)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Failed to add product alias in Supabase", error);
+      alert(`Failed to add alias: ${error.message || error}`);
+      return;
+    }
+
+    const newAlias = {
+      aliasId: data.alias_id,
+      productId: data.product_id,
+      aliasText: data.alias_text,
+      normalizedAlias: data.normalized_alias,
+      source: data.source || "Manual",
+      notes: data.notes || "",
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+    };
+    state.productAliases = [...(state.productAliases || []), newAlias];
+  } else {
+    const newAlias = {
+      aliasId: uid("ALS"),
+      productId,
+      aliasText: text,
+      normalizedAlias: normalized,
+      source: "Manual",
+      notes: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    state.productAliases = [...(state.productAliases || []), newAlias];
+  }
+
+  saveState();
+  const product = (state.products || []).find((p) => p.productId === productId);
+  if (product) renderProductMasterDetailContent(product);
+}
+
+async function removeAlias(aliasId) {
+  if (!isProductMasterAuth()) {
+    alert("Product Master is read-only. Administrator access is required to make changes.");
+    return;
+  }
+
+  const alias = (state.productAliases || []).find((a) => a.aliasId === aliasId);
+  if (!alias) return;
+
+  if (useSupabase) {
+    const { error } = await supabaseClient
+      .from("product_aliases")
+      .delete()
+      .eq("alias_id", aliasId);
+
+    if (error) {
+      console.error("Failed to delete alias from Supabase", error);
+      alert(`Failed to delete alias: ${error.message || error}`);
+      return;
+    }
+  }
+
+  state.productAliases = (state.productAliases || []).filter((a) => a.aliasId !== aliasId);
+  saveState();
+
+  if (state.selectedMasterProductId) {
+    const product = (state.products || []).find((p) => p.productId === state.selectedMasterProductId);
+    if (product) renderProductMasterDetailContent(product);
+  }
+}
+
 function ensureSelectedVendor(vendors) {
   if (!vendors.length) {
     state.selectedVendor = null;
@@ -11617,7 +12486,7 @@ function renderAll() {
   renderCommandKpis(derived);
   renderCommandOverview(derived);
   renderPurchaseOrders(derived);
-  renderProducts(derived);
+  renderProductsWorkspace(derived);
   renderVendors(derived);
   renderMetricProducts(derived);
   renderFollowups(derived);
@@ -11655,6 +12524,21 @@ function bindFilters() {
       (value) => (state.filters.poDelivery = value),
     ],
     ["poSortSelect", "change", (value) => (state.filters.poSort = value)],
+    [
+      "productMasterSearch",
+      "input",
+      (value) => (state.filters.productMasterSearch = value),
+    ],
+    [
+      "productMasterCategoryFilter",
+      "change",
+      (value) => (state.filters.productMasterCategory = value),
+    ],
+    [
+      "productMasterStatusFilter",
+      "change",
+      (value) => (state.filters.productMasterStatus = value),
+    ],
     [
       "productSearch",
       "input",
@@ -12080,10 +12964,101 @@ function handlePoAction(event) {
   }
 }
 
+function bindProductMasterEvents() {
+  document.querySelectorAll("[data-products-subtab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.productsSubTab = btn.dataset.productsSubtab;
+      renderProductsWorkspace(buildDerived());
+    });
+  });
+
+  document
+    .getElementById("openAddProductMasterBtn")
+    ?.addEventListener("click", () => openProductMasterModal());
+
+  document
+    .getElementById("closeProductMasterModalBtn")
+    ?.addEventListener("click", closeProductMasterModal);
+  document
+    .getElementById("cancelProductMasterModalBtn")
+    ?.addEventListener("click", closeProductMasterModal);
+  document
+    .getElementById("productMasterModalBackdrop")
+    ?.addEventListener("click", (event) => {
+      if (event.target.id === "productMasterModalBackdrop") closeProductMasterModal();
+    });
+
+  document
+    .getElementById("productMasterForm")
+    ?.addEventListener("submit", saveProductMasterForm);
+
+  document
+    .getElementById("productMasterTableBody")
+    ?.addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-product-master-action]");
+      if (!btn) {
+        const row = event.target.closest("[data-product-id]");
+        if (row) openProductMasterDetailModal(row.dataset.productId);
+        return;
+      }
+      const action = btn.dataset.productMasterAction;
+      const productId = btn.dataset.productId;
+      if (action === "edit") {
+        const product = (state.products || []).find((p) => p.productId === productId);
+        if (product) openProductMasterModal(product);
+      } else if (action === "toggle-status") {
+        toggleProductStatus(productId);
+      } else if (action === "details") {
+        openProductMasterDetailModal(productId);
+      }
+    });
+
+  document.querySelectorAll("[data-pdetail-tab]").forEach((tabBtn) => {
+    tabBtn.addEventListener("click", () => {
+      state.selectedMasterDetailTab = tabBtn.dataset.pdetailTab;
+      if (state.selectedMasterProductId) {
+        const product = (state.products || []).find((p) => p.productId === state.selectedMasterProductId);
+        if (product) renderProductMasterDetailContent(product);
+      }
+    });
+  });
+
+  document
+    .getElementById("closeProductMasterDetailModalBtn")
+    ?.addEventListener("click", closeProductMasterDetailModal);
+  document
+    .getElementById("productMasterDetailModalBackdrop")
+    ?.addEventListener("click", (event) => {
+      if (event.target.id === "productMasterDetailModalBackdrop") closeProductMasterDetailModal();
+    });
+
+  document
+    .getElementById("addAliasForm")
+    ?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = document.getElementById("aliasTextInput");
+      const productId = document.getElementById("aliasProductId").value;
+      if (productId && input && input.value) {
+        addAliasToProduct(productId, input.value);
+        input.value = "";
+      }
+    });
+
+  document
+    .getElementById("aliasChipsList")
+    ?.addEventListener("click", (event) => {
+      const btn = event.target.closest(".remove-alias-btn");
+      if (btn && btn.dataset.aliasId) {
+        removeAlias(btn.dataset.aliasId);
+      }
+    });
+}
+
 async function init() {
   bindTabs();
   bindFilters();
   bindGlobalEvents();
+  bindProductMasterEvents();
   renderAll();
   if (hasSupabaseConfig() && (useSupabase || (await loadSupabaseSdk()))) {
     await refreshStateFromSupabase({ generateFollowups: true });

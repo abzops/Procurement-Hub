@@ -195,24 +195,63 @@
       </section>
 
       <section class="tab-panel" id="products">
-        <article class="panel">
-          <div class="panel-header wrap">
-            <div>
-              <h2>Product Master</h2>
-              <p class="section-copy">Historical product view across all POs. Lowest historical unit rate is shown as best price.</p>
+        <div class="sub-tabs-bar">
+          <button class="sub-tab active" data-products-subtab="master" type="button">Master Catalog</button>
+          <button class="sub-tab" data-products-subtab="historical" type="button">Historical Analytics</button>
+        </div>
+
+        <div id="productMasterSubPanel" class="products-subpanel active">
+          <article class="panel">
+            <div class="panel-header wrap">
+              <div>
+                <h2>Master Catalog</h2>
+                <p class="section-copy">Canonical Product Master records, codes, standard specifications, and alias mappings.</p>
+              </div>
+              <div class="toolbar">
+                <input class="control-input control-wide" id="productMasterSearch" type="search" placeholder="Search code, name, category, brand, part #..." />
+                <select class="control-input" id="productMasterCategoryFilter">
+                  <option value="all">All Categories</option>
+                </select>
+                <select class="control-input" id="productMasterStatusFilter">
+                  <option value="all">All Statuses</option>
+                  <option value="Active" selected>Active</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
+                <button class="primary-btn" id="openAddProductMasterBtn" type="button">+ Add Product</button>
+              </div>
             </div>
-            <div class="toolbar">
-              <input class="control-input control-wide" id="productSearch" type="search" placeholder="Search product..." />
-              <select class="control-input" id="productSortSelect"></select>
+            <div class="product-master-notice-banner" id="productMasterReadonlyNotice">
+              <span class="notice-icon">ℹ</span> Product Master is read-only. Administrator access is required to make changes.
             </div>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead id="productTableHead"></thead>
-              <tbody id="productTableBody"></tbody>
-            </table>
-          </div>
-        </article>
+            <div class="table-wrap">
+              <table>
+                <thead id="productMasterTableHead"></thead>
+                <tbody id="productMasterTableBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+
+        <div id="historicalProductsSubPanel" class="products-subpanel hidden">
+          <article class="panel">
+            <div class="panel-header wrap">
+              <div>
+                <h2>Historical Analytics</h2>
+                <p class="section-copy">Historical product view across all POs. Lowest historical unit rate is shown as best price.</p>
+              </div>
+              <div class="toolbar">
+                <input class="control-input control-wide" id="productSearch" type="search" placeholder="Search historical product..." />
+                <select class="control-input" id="productSortSelect"></select>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead id="productTableHead"></thead>
+                <tbody id="productTableBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section class="tab-panel" id="vendors">
@@ -818,6 +857,143 @@
         <button class="icon-btn" id="closeDetailModalBtn" type="button" aria-label="Close">&times;</button>
       </div>
       <div id="detailModalContent"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="productMasterModalBackdrop">
+    <div class="modal-shell modal-medium">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">PRODUCT MASTER</p>
+          <h3 id="productMasterModalTitle">Add Master Product</h3>
+          <p class="section-copy" id="productMasterModalSubtext">Define canonical product identity, specifications, and default attributes.</p>
+        </div>
+        <button class="icon-btn" id="closeProductMasterModalBtn" type="button" aria-label="Close">&times;</button>
+      </div>
+
+      <form id="productMasterForm" class="modal-form">
+        <input type="hidden" name="productId" />
+        <div class="form-grid">
+          <label class="field">
+            <span>Product Code</span>
+            <input class="control-input" type="text" name="productCode" placeholder="Auto-generated (SNS-P-00001)" readonly />
+          </label>
+          <label class="field">
+            <span>Status</span>
+            <select class="control-input" name="status">
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </select>
+          </label>
+          <label class="field-full">
+            <span>Product Name *</span>
+            <input class="control-input" type="text" name="productName" required placeholder="e.g. AC Servo Motor & Drive 750W" />
+          </label>
+          <label class="field">
+            <span>Category</span>
+            <input class="control-input" type="text" name="category" placeholder="e.g. Motors & Drives" />
+          </label>
+          <label class="field">
+            <span>Subcategory</span>
+            <input class="control-input" type="text" name="subcategory" placeholder="e.g. AC Servo" />
+          </label>
+          <label class="field">
+            <span>Brand / Make</span>
+            <input class="control-input" type="text" name="brand" placeholder="e.g. Delta / Panasonic" />
+          </label>
+          <label class="field">
+            <span>Manufacturer Part Number</span>
+            <input class="control-input" type="text" name="manufacturerPartNo" placeholder="e.g. ECMA-C20807RS" />
+          </label>
+          <label class="field">
+            <span>Default UOM</span>
+            <select class="control-input" name="defaultUom">
+              <option value="Nos">Nos</option>
+              <option value="Kg">Kg</option>
+              <option value="Mtr">Mtr</option>
+              <option value="Set">Set</option>
+              <option value="Pcs">Pcs</option>
+              <option value="Box">Box</option>
+              <option value="Ltr">Ltr</option>
+              <option value="Pair">Pair</option>
+              <option value="Roll">Roll</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>HSN Code</span>
+            <input class="control-input" type="text" name="hsnCode" placeholder="e.g. 8501" />
+          </label>
+          <label class="field">
+            <span>Default Tax %</span>
+            <input class="control-input" type="number" name="defaultTaxPercent" min="0" max="100" step="0.01" value="18" placeholder="18" />
+          </label>
+          <label class="field">
+            <span>Material Type</span>
+            <select class="control-input" name="defaultMaterialType">
+              <option value="Unknown">Unknown</option>
+              <option value="RTO">RTO</option>
+              <option value="MTO">MTO</option>
+            </select>
+          </label>
+          <label class="field-full">
+            <span>Specification</span>
+            <textarea name="specification" placeholder="Key technical specifications, dimensions, power rating..."></textarea>
+          </label>
+          <label class="field-full">
+            <span>Notes</span>
+            <textarea name="notes" placeholder="Internal procurement notes or guidelines..."></textarea>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="ghost-btn" id="cancelProductMasterModalBtn">Cancel</button>
+          <button type="submit" class="primary-btn" id="saveProductMasterBtn">Save Product</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="productMasterDetailModalBackdrop">
+    <div class="modal-shell modal-medium product-master-detail-modal">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">PRODUCT SPECIFICATION & ALIASES</p>
+          <h3 id="productMasterDetailTitle">Product Details</h3>
+          <p class="section-copy" id="productMasterDetailCode">SNS-P-00000</p>
+        </div>
+        <button class="icon-btn" id="closeProductMasterDetailModalBtn" type="button" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="modal-sub-tabs">
+        <button class="modal-sub-tab active" id="pDetailTabOverview" data-pdetail-tab="overview" type="button">Overview</button>
+        <button class="modal-sub-tab" id="pDetailTabAliases" data-pdetail-tab="aliases" type="button">Aliases & Naming Variations</button>
+      </div>
+
+      <div id="productDetailOverviewSection" class="pdetail-section active">
+        <div id="productDetailOverviewContent"></div>
+      </div>
+
+      <div id="productDetailAliasesSection" class="pdetail-section hidden">
+        <div class="alias-management-box">
+          <p class="section-copy">Aliases allow historical PO line item descriptions to map to this canonical product without rewriting historical records.</p>
+
+          <div class="product-master-notice-banner" id="aliasReadonlyNotice">
+            <span class="notice-icon">ℹ</span> Alias editing is read-only. Administrator access is required to add or remove aliases.
+          </div>
+
+          <form id="addAliasForm" class="add-alias-inline-form">
+            <input type="hidden" name="productId" id="aliasProductId" />
+            <div class="inline-alias-inputs">
+              <input class="control-input control-wide" type="text" name="aliasText" id="aliasTextInput" required placeholder="Enter historical alias/description variation..." />
+              <button class="primary-btn small-btn" type="submit">+ Add Alias</button>
+            </div>
+          </form>
+
+          <div class="alias-list-container">
+            <h4 class="alias-list-title">Mapped Aliases (<span id="aliasCountBadge">0</span>)</h4>
+            <div id="aliasChipsList" class="alias-chips-list"></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

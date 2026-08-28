@@ -4867,3 +4867,227 @@ body {
     min-width: 0;
   }
 }
+
+/* ==========================================================================
+   Product Master P1 — Foundation Styles
+   ========================================================================== */
+
+.sub-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 8px;
+}
+
+.sub-tab {
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #9ab0b3;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sub-tab:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.sub-tab.active {
+  background: rgba(253, 226, 21, 0.12);
+  border-color: var(--accent, #fde215);
+  color: var(--accent, #fde215);
+}
+
+.products-subpanel.hidden {
+  display: none !important;
+}
+
+.badge.status-active {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.badge.status-inactive {
+  background: rgba(156, 163, 175, 0.15);
+  color: #9ca3af;
+  border: 1px solid rgba(156, 163, 175, 0.3);
+}
+
+.product-code-tag {
+  display: inline-block;
+  font-family: monospace;
+  font-weight: 700;
+  color: var(--accent, #fde215);
+  background: rgba(253, 226, 21, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(253, 226, 21, 0.2);
+}
+
+.modal-sub-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 8px;
+}
+
+.modal-sub-tab {
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #8fa4a7;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.modal-sub-tab:hover {
+  color: #fff;
+}
+
+.modal-sub-tab.active {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.pdetail-section.hidden {
+  display: none !important;
+}
+
+.alias-management-box {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.add-alias-inline-form .inline-alias-inputs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.alias-list-container {
+  margin-top: 8px;
+}
+
+.alias-list-title {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8fa4a7;
+  margin-bottom: 10px;
+}
+
+.alias-chips-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.alias-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #dce6e7;
+}
+
+.alias-chip .remove-alias-btn {
+  background: none;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.alias-chip .remove-alias-btn:hover {
+  color: #f87171;
+}
+
+.product-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.product-overview-cell {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.product-overview-cell span {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #7b9295;
+  margin-bottom: 3px;
+}
+
+.product-overview-cell strong {
+  display: block;
+  font-size: 13px;
+  color: #e5edf0;
+}
+
+.product-overview-cell.full-width {
+  grid-column: span 2;
+}
+
+.auth-hint-tag {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  vertical-align: middle;
+  font-weight: 500;
+}
+
+.product-master-notice-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: #93c5fd;
+  margin-bottom: 14px;
+}
+
+.product-master-notice-banner.hidden {
+  display: none !important;
+}
+
+.product-master-notice-banner .notice-icon {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+button:disabled,
+button[disabled] {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+}
