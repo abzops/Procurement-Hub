@@ -1623,6 +1623,7 @@ async function loadRemoteStateFromSupabase() {
   });
   baseRows.forEach((row) => {
     const po = poMap.get(row.poNumber);
+    row.poStatus = normalizePoStatus(po?.po_status || row.poStatus);
     row.discountAmount = Number(po?.discount_amount || 0);
     row.discountType =
       cleanText(po?.discount_type || "amount").toLowerCase() === "percent"
@@ -2135,6 +2136,7 @@ async function syncStateToSupabase() {
     const poPayload = dedupeRecordsByKey(
       derived.pos.map((po) => {
         const auditPo = procurementAuditState().poMaster[cleanText(po.poNumber)] || {};
+        const safePoStatus = normalizePoStatus(po.poStatus || "Unknown");
         return {
         po_number: po.poNumber,
         po_date: safeDate(po.poDate),
@@ -2144,7 +2146,7 @@ async function syncStateToSupabase() {
         delivery_date: safeDate(po.deliveryDate),
         delivered_date: safeDate(po.deliveredDate),
         payment_status: po.paymentStatus || "",
-        po_status: po.poStatus || "",
+        po_status: safePoStatus === "Mixed" ? "Unknown" : safePoStatus,
         delivery_status: po.deliveryStatus || "",
         terms: po.terms || "",
         po_total: toNumeric(po.poTotal),
@@ -2184,8 +2186,16 @@ async function syncStateToSupabase() {
       "po_number",
     );
 
+    const poStatusByNumber = new Map(
+      poPayload.map((po) => [cleanText(po.po_number), po.po_status]),
+    );
+
     const linePayload = dedupeRecordsByKey(
-      allRowsData.map((line) => ({
+      allRowsData.map((line) => {
+        const parentPoStatus =
+          poStatusByNumber.get(cleanText(line.poNumber)) ||
+          normalizePoStatus(line.poStatus || "Unknown");
+        return {
         line_id: line.id,
         po_number: line.poNumber,
         vendor_name: line.vendorName,
@@ -2193,7 +2203,7 @@ async function syncStateToSupabase() {
         delivery_date: safeDate(line.deliveryDate),
         delivered_date: safeDate(line.deliveredDate),
         payment_status: line.paymentStatus || "",
-        po_status: line.poStatus || "",
+        po_status: parentPoStatus === "Mixed" ? "Unknown" : parentPoStatus,
         delivery_status: line.deliveryStatus || "",
         line_type: line.lineType || inferLineType(line.itemDesc, line.lineType),
         is_charge: Boolean(line.isCharge),
@@ -2210,7 +2220,8 @@ async function syncStateToSupabase() {
         source: line.source || "",
         gstin: line.gstin || "",
         manual: Boolean(line.manual),
-      })),
+      };
+      }),
       "line_id",
     );
 
@@ -2495,9 +2506,10 @@ function convertZohoPoPayloadToDbPayload(payload) {
   const paymentStatus = normalizePaymentStatus(
     payload.payment_status || payload.payment_terms_label || "Pending",
   );
-  const poStatus = normalizePoStatus(
+  const rawPoStatus = normalizePoStatus(
     payload.status || payload.po_status || "Issued",
   );
+  const poStatus = rawPoStatus === "Mixed" ? "Unknown" : rawPoStatus;
   const deliveryStatus = normalizeDeliveryStatus(
     payload.delivery_status ||
       payload.received_status ||
@@ -2720,7 +2732,10 @@ async function upsertDbPayloadToSupabase(payload) {
         po.delivered_date || po.actual_delivery_date || po.deliveryCompletedDate,
       ),
       payment_status: normalizePaymentStatus(po.payment_status || "Pending"),
-      po_status: normalizePoStatus(po.po_status || "Issued"),
+      po_status: (() => {
+        const safe = normalizePoStatus(po.po_status || "Issued");
+        return safe === "Mixed" ? "Unknown" : safe;
+      })(),
       delivery_status: normalizeDeliveryStatus(po.delivery_status || "Unknown"),
       terms: String(po.terms ?? ""),
       po_total: toNumeric(po.po_total),
@@ -2756,8 +2771,16 @@ async function upsertDbPayloadToSupabase(payload) {
     "po_number",
   );
 
+  const poStatusByNumber = new Map(
+    poPayload.map((po) => [cleanText(po.po_number), po.po_status]),
+  );
+
   const linePayload = dedupeRecordsByKey(
-    (normalized.po_lines || []).map((line) => ({
+    (normalized.po_lines || []).map((line) => {
+      const parentPoStatus =
+        poStatusByNumber.get(cleanText(line.po_number)) ||
+        normalizePoStatus(line.po_status || "Issued");
+      return {
       line_id: cleanText(line.line_id),
       po_number: cleanText(line.po_number),
       vendor_name: cleanText(line.vendor_name),
@@ -2769,7 +2792,7 @@ async function upsertDbPayloadToSupabase(payload) {
           line.deliveryCompletedDate,
       ),
       payment_status: normalizePaymentStatus(line.payment_status || "Pending"),
-      po_status: normalizePoStatus(line.po_status || "Issued"),
+      po_status: parentPoStatus === "Mixed" ? "Unknown" : parentPoStatus,
       delivery_status: normalizeDeliveryStatus(
         line.delivery_status || "Unknown",
       ),
@@ -2790,7 +2813,8 @@ async function upsertDbPayloadToSupabase(payload) {
       source: cleanText(line.source),
       gstin: cleanText(line.gstin),
       manual: Boolean(line.manual),
-    })),
+    };
+    }),
     "line_id",
   );
 
@@ -3189,12 +3213,14 @@ function normalizePaymentStatus(value) {
 
 function normalizePoStatus(value) {
   const raw = normalizeKey(value);
-  if (!raw) return "Unknown";
+  if (!raw || raw === "MIXED" || raw.includes("MIXED")) return "Unknown";
   if (raw.includes("DRAFT")) return "Draft";
   if (raw.includes("BILL")) return "Billed";
   if (raw.includes("ISSU")) return "Issued";
   if (raw.includes("CLOSE")) return "Closed";
-  return cleanText(value) || "Unknown";
+  const cleaned = cleanText(value);
+  if (cleaned.toLowerCase() === "mixed") return "Unknown";
+  return cleaned || "Unknown";
 }
 
 function normalizeMaterialType(value) {
@@ -3754,7 +3780,7 @@ function groupedPOs(rows) {
         summarizeDate(items, "deliveryDate") || first.deliveryDate || "",
       deliveredDate: resolveDeliveredDate(poNumber, savedDeliveredDate),
       paymentStatus: summarizeStatus(items, "paymentStatus"),
-      poStatus: summarizeStatus(items, "poStatus"),
+      poStatus: normalizePoStatus(first.poStatus || items[0]?.poStatus || "Unknown"),
       deliveryStatus: summarizeStatus(items, "deliveryStatus"),
       itemCount: items.length,
       productCount: groupedItems.length,
@@ -7884,6 +7910,24 @@ function recordDeliveryStatusChange(existingPo, payload) {
 
 function applyPoChanges(existingPo, payload) {
   if (!payload) return;
+
+  const nextPoStatus = payload.updatedRows?.[0]?.poStatus;
+  if (nextPoStatus) {
+    const poNumber = cleanText(payload.poNumber);
+    baseRows.forEach((row) => {
+      if (cleanText(row.poNumber) === poNumber) {
+        state.rowOverrides[row.id] = {
+          ...(state.rowOverrides[row.id] || {}),
+          poStatus: nextPoStatus,
+        };
+      }
+    });
+    (state.manualRows || []).forEach((row) => {
+      if (cleanText(row.poNumber) === poNumber) {
+        row.poStatus = nextPoStatus;
+      }
+    });
+  }
 
   payload.updatedRows.forEach((row) => {
     if (row.manual) {
