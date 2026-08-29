@@ -2552,7 +2552,7 @@ function loadJson(key, fallback) {
   }
 }
 
-function saveState() {
+function saveState(options = {}) {
   localStorage.setItem(
     STORAGE_KEYS.manualRows,
     JSON.stringify(state.manualRows),
@@ -2598,7 +2598,9 @@ function saveState() {
     STORAGE_KEYS.productAliases,
     JSON.stringify(state.productAliases || []),
   );
-  scheduleRemoteSync();
+  if (!options.skipRemoteSync) {
+    scheduleRemoteSync();
+  }
 }
 
 function mergeVendorSeeds(existing) {
@@ -3038,12 +3040,45 @@ async function upsertDbPayloadToSupabase(payload) {
     );
   }
   if (linePayload.length) {
+    // 1. Upsert incoming authoritative lines first
     await upsertSupabaseWithOptionalColumns(
       "po_lines",
       linePayload,
       { onConflict: "line_id" },
       ["delivered_date"],
     );
+
+    // 2. Reconcile lines per PO to ensure no stale lines remain
+    const incomingByPo = new Map();
+    linePayload.forEach((line) => {
+      const poNum = cleanText(line.po_number);
+      if (poNum) {
+        if (!incomingByPo.has(poNum)) incomingByPo.set(poNum, []);
+        incomingByPo.get(poNum).push(line);
+      }
+    });
+
+    for (const [poNum, incomingLines] of incomingByPo.entries()) {
+      const { data: existingLines, error: fetchErr } = await supabaseClient
+        .from("po_lines")
+        .select("line_id")
+        .eq("po_number", poNum);
+      if (fetchErr) throw fetchErr;
+
+      if (existingLines && existingLines.length) {
+        const incomingIds = new Set(incomingLines.map((l) => cleanText(l.line_id)));
+        const staleIds = existingLines
+          .map((l) => cleanText(l.line_id))
+          .filter((id) => !incomingIds.has(id));
+        if (staleIds.length) {
+          const { error: delErr } = await supabaseClient
+            .from("po_lines")
+            .delete()
+            .in("line_id", staleIds);
+          if (delErr) throw delErr;
+        }
+      }
+    }
   }
   return {
     vendors: vendorsPayload.length,
@@ -9240,6 +9275,7 @@ function createLineItemCard(values = {}) {
   const index = document.querySelectorAll(".line-item-card").length + 1;
   const wrapper = document.createElement("div");
   const lineType = inferLineType(values.itemDesc, values.lineType);
+  const lineId = cleanText(values.id || values.line_id || values.lineId || uid("line"));
   const productId = cleanText(values.productId || values.product_id || "");
   wrapper.className = "line-item-card";
   wrapper.innerHTML = `
@@ -9247,6 +9283,7 @@ function createLineItemCard(values = {}) {
       <div class="line-title">${getLineTypeLabel(lineType)} ${index}</div>
       <button type="button" class="danger-btn small-btn" data-line-remove>Remove</button>
     </div>
+    <input type="hidden" name="lineId" value="${escapeHtml(lineId)}" />
     <input type="hidden" name="productId" value="${escapeHtml(productId)}" />
     <div class="line-item-grid">
       <label class="field">
@@ -9318,7 +9355,7 @@ function syncDeliveredDateField({ stampIfEmpty = false } = {}) {
 }
 
 function openPoModal(po = null, options = {}) {
-  state.editingPoKey = po?.poKey || null;
+  state.editingPoKey = po?.poKey || po?.poNumber || null;
   const modal = document.getElementById("poModalBackdrop");
   const title = document.getElementById("poModalTitle");
   const subtext = document.getElementById("poModalSubtext");
@@ -9535,6 +9572,7 @@ function collectPoFormPayload(existingPo = null) {
   const lineCards = Array.from(document.querySelectorAll(".line-item-card"));
   const rawLines = lineCards
     .map((card) => {
+      const lineId = cleanText(card.querySelector('[name="lineId"]')?.value) || uid("line");
       const productId = cleanText(card.querySelector('[name="productId"]')?.value) || null;
       const itemDesc = cleanText(
         card.querySelector('[name="itemDesc"]')?.value,
@@ -9551,6 +9589,7 @@ function collectPoFormPayload(existingPo = null) {
         card.querySelector('[name="lineType"]')?.value,
       );
       return {
+        id: lineId,
         productId: lineType === "charge" ? null : productId,
         itemDesc,
         quantityOrdered,
@@ -9582,12 +9621,13 @@ function collectPoFormPayload(existingPo = null) {
     amountPaidInput,
   );
   const originalItems = existingPo?.items || [];
-  const usedBaseIds = new Set();
+  const originalItemMap = new Map(originalItems.map((item) => [item.id, item]));
+  const submittedLineIds = new Set(breakdown.lines.map((line) => line.id));
+
   const updatedRows = breakdown.lines.map((line, index) => {
-    const base = originalItems[index];
-    if (base?.id) usedBaseIds.add(base.id);
+    const base = originalItemMap.get(line.id);
     return {
-      id: base?.id || uid("manual"),
+      id: line.id,
       productId: line.productId || null,
       poDate,
       deliveryDate,
@@ -9622,11 +9662,11 @@ function collectPoFormPayload(existingPo = null) {
       discountInputValue: breakdown.discountInputValue,
       adjustmentAmount: breakdown.adjustmentAmount,
       amountPaid: paymentState.amountPaid,
-      manual: base?.manual || !base,
+      manual: base ? Boolean(base.manual) : true,
     };
   });
 
-  const removedRows = originalItems.filter((item) => !usedBaseIds.has(item.id));
+  const removedRows = originalItems.filter((item) => !submittedLineIds.has(item.id));
 
   return {
     updatedRows,
@@ -9678,9 +9718,163 @@ function recordDeliveryStatusChange(existingPo, payload) {
   }
 }
 
-function applyPoChanges(existingPo, payload) {
+async function reconcilePoInSupabase(payload) {
+  if (!useSupabase || !supabaseClient) return;
+  const poNumber = cleanText(payload.poNumber);
+  if (!poNumber) return;
+
+  const submittedRows = payload.updatedRows || [];
+  const submittedIds = new Set(submittedRows.map((r) => cleanText(r.id)));
+
+  // 1. Build and upsert PO header first
+  const derived = buildDerived();
+  const po = derived.pos.find((p) => cleanText(p.poNumber) === poNumber);
+  if (po) {
+    const auditPo = procurementAuditState().poMaster[poNumber] || {};
+    const safePoStatus = normalizePoStatus(po.poStatus || "Unknown");
+    const poPayload = [
+      {
+        po_number: po.poNumber,
+        po_date: safeDate(po.poDate),
+        vendor_name: po.vendorName,
+        source: po.source || "",
+        gstin: po.gstin || "",
+        delivery_date: safeDate(po.deliveryDate),
+        delivered_date: safeDate(po.deliveredDate),
+        payment_status: po.paymentStatus || "",
+        po_status: safePoStatus === "Mixed" ? "Unknown" : safePoStatus,
+        delivery_status: po.deliveryStatus || "",
+        terms: po.terms || "",
+        po_total: toNumeric(po.poTotal),
+        discount_amount: toNumeric(po.discountAmount),
+        discount_type: po.discountType || "amount",
+        discount_input_value: toNumeric(po.discountInputValue),
+        adjustment_amount: toNumeric(po.adjustmentAmount),
+        amount_paid: toNumeric(po.amountPaid),
+        balance_due: toNumeric(po.balanceDue),
+        item_count: Number(po.itemCount || 0),
+        product_count: Number(po.productCount || 0),
+        charge_count: Number(po.chargeCount || 0),
+        total_qty: toNumeric(po.totalQty),
+        total_charge_value: toNumeric(po.totalChargeValue),
+        reference_no: "",
+        material_type: normalizeMaterialType(po.materialType || "Unknown"),
+        vendor_email: cleanText(
+          po.vendorEmail || state.vendorContacts[po.vendorName]?.email || "",
+        ),
+        vendor_phone: cleanText(
+          po.vendorPhone || state.vendorContacts[po.vendorName]?.phone || "",
+        ),
+        delay_reason: cleanText(po.delayReason || ""),
+        edd: safeDate(po.edd),
+        purchase_category: cleanText(auditPo.purchaseCategory || ""),
+        currency_code: cleanText(
+          state.vendorContacts[po.vendorName]?.currencyCode || "INR",
+        ),
+        gst_included:
+          auditPo.gstIncluded === ""
+            ? null
+            : normalizeKey(auditPo.gstIncluded) === "YES",
+        advance_paid: toNumeric(auditPo.advancePaid),
+        audit_status: cleanText(auditPo.auditStatus || "Pending"),
+      },
+    ];
+
+    await upsertSupabaseWithOptionalColumns(
+      "purchase_orders",
+      poPayload,
+      { onConflict: "po_number" },
+      [
+        "delivered_date",
+        "purchase_category",
+        "currency_code",
+        "gst_included",
+        "advance_paid",
+        "audit_status",
+      ],
+    );
+  }
+
+  // 2. Build and upsert submitted lines FIRST before deleting stale lines
+  const linePayload = submittedRows.map((line) => ({
+    line_id: line.id,
+    product_id: line.productId || line.product_id || null,
+    po_number: poNumber,
+    vendor_name: line.vendorName,
+    po_date: safeDate(line.poDate),
+    delivery_date: safeDate(line.deliveryDate),
+    delivered_date: safeDate(line.deliveredDate),
+    payment_status: line.paymentStatus || "",
+    po_status: normalizePoStatus(line.poStatus || "Unknown"),
+    delivery_status: line.deliveryStatus || "",
+    line_type: line.lineType || inferLineType(line.itemDesc, line.lineType),
+    is_charge: Boolean(line.isCharge) || inferLineType(line.itemDesc, line.lineType) === "charge",
+    item_desc: line.itemDesc,
+    quantity_ordered: toNumeric(line.quantityOrdered),
+    uom: cleanText(line.uom || ""),
+    item_price: toNumeric(line.itemPrice),
+    item_tax_percent: toNumeric(line.itemTaxPercent),
+    item_tax_amount: toNumeric(line.itemTaxAmount),
+    item_total: toNumeric(line.itemTotal),
+    line_grand_total: toNumeric(line.lineGrandTotal),
+    balance_due: toNumeric(line.balanceDue),
+    terms: line.terms || "",
+    source: line.source || "",
+    gstin: line.gstin || "",
+    manual: Boolean(line.manual),
+  }));
+
+  if (linePayload.length > 0) {
+    await upsertSupabaseWithOptionalColumns(
+      "po_lines",
+      linePayload,
+      { onConflict: "line_id" },
+      ["delivered_date", "product_id"],
+    );
+  }
+
+  // 3. Delete stale line IDs for ONLY this PO
+  const { data: remoteLines, error: fetchErr } = await supabaseClient
+    .from("po_lines")
+    .select("line_id")
+    .eq("po_number", poNumber);
+
+  if (fetchErr) throw fetchErr;
+
+  const staleIds = (remoteLines || [])
+    .map((r) => cleanText(r.line_id))
+    .filter((id) => !submittedIds.has(id));
+
+  if (staleIds.length > 0) {
+    const { error: delErr } = await supabaseClient
+      .from("po_lines")
+      .delete()
+      .in("line_id", staleIds);
+    if (delErr) throw delErr;
+  }
+
+  // 4. Verify line count in Supabase matches submitted line count
+  const { count, error: countErr } = await supabaseClient
+    .from("po_lines")
+    .select("line_id", { count: "exact", head: true })
+    .eq("po_number", poNumber);
+
+  if (!countErr && count !== null) {
+    if (count !== submittedRows.length) {
+      console.warn(
+        `PO line count mismatch after save for ${poNumber}: expected ${submittedRows.length}, found ${count} in Supabase`,
+      );
+    }
+  }
+}
+
+async function applyPoChanges(existingPo, payload) {
   if (!payload) return;
 
+  // 1. Cancel pending bulk remote sync to prevent race conditions
+  clearTimeout(remoteSyncTimer);
+
+  // 2. Update local state
   const nextPoStatus = payload.updatedRows?.[0]?.poStatus;
   if (nextPoStatus) {
     const poNumber = cleanText(payload.poNumber);
@@ -9745,7 +9939,27 @@ function applyPoChanges(existingPo, payload) {
 
   recordDeliveryStatusChange(existingPo, payload);
   markPoNumberSubmitted(payload.poNumber);
-  saveState();
+
+  // Save to localStorage without triggering bulk remote sync
+  saveState({ skipRemoteSync: true });
+
+  // 3. Reconcile ONLY this PO in Supabase & 4. Reload authoritative remote state
+  if (useSupabase && supabaseClient) {
+    try {
+      await reconcilePoInSupabase(payload);
+      await loadRemoteStateFromSupabase();
+    } catch (err) {
+      console.error("Supabase PO reconciliation failed:", err);
+      alert(`PO save failed in database: ${err.message || err}`);
+      try {
+        await loadRemoteStateFromSupabase();
+      } catch (_) {}
+      renderAll();
+      return; // Do NOT close the modal or treat local state as saved
+    }
+  }
+
+  // 5. Close modal and render on success
   closePoModal();
   renderAll();
 }
@@ -13749,13 +13963,16 @@ function bindGlobalEvents() {
     .querySelector('#poForm [name="deliveryStatus"]')
     ?.addEventListener("change", () => syncDeliveredDateField({ stampIfEmpty: true }));
 
-  document.getElementById("poForm").addEventListener("submit", (event) => {
+  document.getElementById("poForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const existing = state.editingPoKey
-      ? getDerivedAndGroupedPo(state.editingPoKey).po
+    const poNumInput = cleanText(document.querySelector('#poForm [name="poNumber"]')?.value);
+    const existingKey = state.editingPoKey || poNumInput;
+    const existing = existingKey
+      ? getDerivedAndGroupedPo(existingKey).po
       : null;
     const payload = collectPoFormPayload(existing);
-    applyPoChanges(existing, payload);
+    if (!payload) return;
+    await applyPoChanges(existing, payload);
   });
 
   document.getElementById("poList").addEventListener("click", handlePoAction);
