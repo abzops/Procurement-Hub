@@ -3786,7 +3786,7 @@ function deriveDeliveredDateFromHistory(poNumber) {
 }
 
 function resolveDeliveredDate(poNumber, savedDate = "") {
-  return deriveDeliveredDateFromHistory(poNumber) || safeDate(savedDate) || "";
+  return safeDate(savedDate) || deriveDeliveredDateFromHistory(poNumber) || "";
 }
 
 function groupedPoItems(items) {
