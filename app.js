@@ -2392,6 +2392,7 @@ async function syncStateToSupabase() {
           normalizePoStatus(line.poStatus || "Unknown");
         return {
         line_id: line.id,
+        product_id: line.productId || line.product_id || null,
         po_number: line.poNumber,
         vendor_name: line.vendorName,
         po_date: safeDate(line.poDate),
@@ -9210,22 +9211,56 @@ function getDerivedAndGroupedPo(poKey) {
   return { derived, po };
 }
 
+function renderProductMasterOptions(selectedProductId = null) {
+  const products = state.products || [];
+  const aliases = state.productAliases || [];
+
+  // Active products or the currently selected product (even if inactive)
+  const eligible = products.filter(
+    (p) => (p.status || "Active") === "Active" || p.productId === selectedProductId,
+  );
+
+  eligible.sort((a, b) => (a.productName || "").localeCompare(b.productName || ""));
+
+  return eligible
+    .map((p) => {
+      const isSelected = p.productId === selectedProductId;
+      const isInactive = (p.status || "Active") === "Inactive";
+      const pAliases = aliases
+        .filter((a) => a.productId === p.productId)
+        .map((a) => a.aliasText);
+      const aliasTag = pAliases.length ? ` [Alias: ${pAliases.slice(0, 2).join(", ")}]` : "";
+      const label = `${p.productCode || "SNS-P-00000"} | ${p.productName}${p.brand ? " | " + p.brand : ""}${isInactive ? " (Inactive)" : ""}${aliasTag}`;
+      return `<option value="${escapeHtml(p.productId)}" ${isSelected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
+}
+
 function createLineItemCard(values = {}) {
   const index = document.querySelectorAll(".line-item-card").length + 1;
   const wrapper = document.createElement("div");
   const lineType = inferLineType(values.itemDesc, values.lineType);
+  const productId = cleanText(values.productId || values.product_id || "");
   wrapper.className = "line-item-card";
   wrapper.innerHTML = `
     <div class="line-item-top">
       <div class="line-title">${getLineTypeLabel(lineType)} ${index}</div>
       <button type="button" class="danger-btn small-btn" data-line-remove>Remove</button>
     </div>
+    <input type="hidden" name="productId" value="${escapeHtml(productId)}" />
     <div class="line-item-grid">
       <label class="field">
         <span>Line Type</span>
         <select class="control-input" name="lineType">
           <option value="product" ${lineType === "product" ? "selected" : ""}>Product</option>
           <option value="charge" ${lineType === "charge" ? "selected" : ""}>Charge</option>
+        </select>
+      </label>
+      <label class="field product-master-picker-field ${lineType === "charge" ? "hidden" : ""}">
+        <span>Master Product</span>
+        <select class="control-input" name="productMasterSelect">
+          <option value="">-- Unlinked item (Custom Description) --</option>
+          ${renderProductMasterOptions(productId)}
         </select>
       </label>
       <label class="field">
@@ -9500,6 +9535,7 @@ function collectPoFormPayload(existingPo = null) {
   const lineCards = Array.from(document.querySelectorAll(".line-item-card"));
   const rawLines = lineCards
     .map((card) => {
+      const productId = cleanText(card.querySelector('[name="productId"]')?.value) || null;
       const itemDesc = cleanText(
         card.querySelector('[name="itemDesc"]')?.value,
       );
@@ -9515,6 +9551,7 @@ function collectPoFormPayload(existingPo = null) {
         card.querySelector('[name="lineType"]')?.value,
       );
       return {
+        productId: lineType === "charge" ? null : productId,
         itemDesc,
         quantityOrdered,
         uom: normalizeUom(card.querySelector('[name="uom"]')?.value),
@@ -9551,6 +9588,7 @@ function collectPoFormPayload(existingPo = null) {
     if (base?.id) usedBaseIds.add(base.id);
     return {
       id: base?.id || uid("manual"),
+      productId: line.productId || null,
       poDate,
       deliveryDate,
       deliveredDate,
@@ -13650,7 +13688,39 @@ function bindGlobalEvents() {
     .getElementById("poLineItems")
     .addEventListener("input", recalcPoSummary);
   document.getElementById("poLineItems").addEventListener("change", (event) => {
-    if (event.target.matches('[name="lineType"]')) refreshLineIndexes();
+    const card = event.target.closest(".line-item-card");
+    if (event.target.matches('[name="lineType"]')) {
+      const isCharge = event.target.value === "charge";
+      const picker = card?.querySelector(".product-master-picker-field");
+      if (picker) picker.classList.toggle("hidden", isCharge);
+      if (isCharge && card) {
+        const prodHidden = card.querySelector('[name="productId"]');
+        const prodSelect = card.querySelector('[name="productMasterSelect"]');
+        if (prodHidden) prodHidden.value = "";
+        if (prodSelect) prodSelect.value = "";
+      }
+      refreshLineIndexes();
+    }
+
+    if (event.target.matches('[name="productMasterSelect"]')) {
+      const selectedProductId = event.target.value;
+      const prodHidden = card?.querySelector('[name="productId"]');
+      if (prodHidden) prodHidden.value = selectedProductId;
+
+      if (selectedProductId) {
+        const product = (state.products || []).find((p) => p.productId === selectedProductId);
+        if (product && card) {
+          const descInput = card.querySelector('[name="itemDesc"]');
+          const uomInput = card.querySelector('[name="uom"]');
+          const taxInput = card.querySelector('[name="itemTaxPercent"]');
+
+          if (descInput) descInput.value = product.productName || "";
+          if (uomInput) uomInput.value = product.defaultUom || "Nos";
+          if (taxInput) taxInput.value = String(product.defaultTaxPercent ?? 18);
+        }
+      }
+    }
+
     recalcPoSummary();
   });
 
