@@ -653,6 +653,8 @@ const state = {
   authSession: null,
   isAuthenticatedUser: false,
   productMasterCanWrite: false,
+  activeMappingGroup: null,
+  pendingHistoricalMapping: null,
   activeTab: "overview",
   selectedVendor: null,
   selectedMetricProduct: null,
@@ -674,6 +676,7 @@ const state = {
     productMasterSearch: "",
     productMasterCategory: "all",
     productMasterStatus: "Active",
+    unmappedProductSearch: "",
     productSearch: "",
     productSort: "totalSpend-desc",
     vendorSearch: "",
@@ -1609,6 +1612,7 @@ async function loadRemoteStateFromSupabase() {
 
   baseRows = lines.map((line) => ({
     id: line.line_id,
+    productId: line.product_id || null,
     poDate: line.po_date || "",
     deliveryDate: line.delivery_date || "",
     deliveredDate: line.delivered_date || "",
@@ -3283,6 +3287,13 @@ function normalizeKey(value) {
   return cleanText(value).toUpperCase();
 }
 
+function normalizeProductMasterName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
 function metricStorageKey(productName, vendorName) {
   return `${cleanText(productName)}__${cleanText(vendorName)}`;
 }
@@ -3559,6 +3570,7 @@ function materializeRow(row) {
   return {
     ...row,
     id: cleanText(row.id) || uid("row"),
+    productId: cleanText(row.productId || row.product_id) || null,
     poDate: cleanText(row.poDate),
     deliveryDate: cleanText(row.deliveryDate),
     deliveredDate: cleanText(row.deliveredDate),
@@ -7357,6 +7369,7 @@ function renderProductMaster() {
   if (!tableHead || !tableBody) return;
 
   const isAuthAdmin = isProductMasterAuth();
+  const isAuth = isAuthAdmin;
   const isAuthedNonAdmin = state.isAuthenticatedUser && !state.productMasterCanWrite;
 
   if (readonlyNotice) {
@@ -7484,19 +7497,403 @@ function renderProductMaster() {
 
 function renderProductsWorkspace(derived) {
   const masterSubTabBtn = document.querySelector('[data-products-subtab="master"]');
+  const unmappedSubTabBtn = document.querySelector('[data-products-subtab="unmapped"]');
   const histSubTabBtn = document.querySelector('[data-products-subtab="historical"]');
   const masterPanel = document.getElementById("productMasterSubPanel");
+  const unmappedPanel = document.getElementById("unmappedProductsSubPanel");
   const histPanel = document.getElementById("historicalProductsSubPanel");
 
-  const isMaster = state.productsSubTab === "master";
+  const currentSubTab = state.productsSubTab || "master";
 
-  if (masterSubTabBtn) masterSubTabBtn.classList.toggle("active", isMaster);
-  if (histSubTabBtn) histSubTabBtn.classList.toggle("active", !isMaster);
-  if (masterPanel) masterPanel.classList.toggle("hidden", !isMaster);
-  if (histPanel) histPanel.classList.toggle("hidden", isMaster);
+  if (masterSubTabBtn) masterSubTabBtn.classList.toggle("active", currentSubTab === "master");
+  if (unmappedSubTabBtn) unmappedSubTabBtn.classList.toggle("active", currentSubTab === "unmapped");
+  if (histSubTabBtn) histSubTabBtn.classList.toggle("active", currentSubTab === "historical");
+
+  if (masterPanel) masterPanel.classList.toggle("hidden", currentSubTab !== "master");
+  if (unmappedPanel) unmappedPanel.classList.toggle("hidden", currentSubTab !== "unmapped");
+  if (histPanel) histPanel.classList.toggle("hidden", currentSubTab !== "historical");
 
   renderProductMaster();
+  renderUnmappedProducts(derived);
   renderProducts(derived);
+}
+
+function buildUnmappedProductsSummary(rows = allRows()) {
+  const unmappedGroups = new Map();
+  let mappedLines = 0;
+  let remainingLines = 0;
+  const mappedDescriptions = new Set();
+  const unmappedDescriptions = new Set();
+
+  rows.forEach((row) => {
+    if (row.isCharge || row.lineType === "charge" || row.__deleted) return;
+    const rawDesc = cleanText(row.itemDesc);
+    if (!rawDesc) return;
+    const normalizedKey = normalizeProductMasterName(rawDesc);
+    if (!normalizedKey) return;
+
+    if (row.productId) {
+      mappedLines++;
+      mappedDescriptions.add(normalizedKey);
+      return;
+    }
+
+    remainingLines++;
+    unmappedDescriptions.add(normalizedKey);
+
+    if (!unmappedGroups.has(normalizedKey)) {
+      unmappedGroups.set(normalizedKey, {
+        normalizedKey,
+        sampleDesc: rawDesc,
+        allDescriptions: new Set([rawDesc]),
+        uom: row.uom || "Nos",
+        allUoms: new Set([row.uom || "Nos"]),
+        poNumbers: new Set([row.poNumber]),
+        vendorNames: new Set([cleanText(row.vendorName) || "Unknown Vendor"]),
+        totalQty: 0,
+        lastPurchased: row.poDate || "",
+        lineIds: [],
+        suggestedProduct: null,
+      });
+    }
+
+    const grp = unmappedGroups.get(normalizedKey);
+    grp.allDescriptions.add(rawDesc);
+    if (row.uom) grp.allUoms.add(row.uom);
+    if (row.poNumber) grp.poNumbers.add(row.poNumber);
+    if (row.vendorName) grp.vendorNames.add(cleanText(row.vendorName));
+    grp.totalQty += number(row.quantityOrdered);
+    if (new Date(row.poDate || 0).getTime() > new Date(grp.lastPurchased || 0).getTime()) {
+      grp.lastPurchased = row.poDate;
+    }
+    grp.lineIds.push(row.id);
+  });
+
+  unmappedGroups.forEach((grp) => {
+    let match = (state.products || []).find(
+      (p) => normalizeProductMasterName(p.productName) === grp.normalizedKey,
+    );
+    if (!match && state.productAliases) {
+      const aliasMatch = state.productAliases.find(
+        (a) => normalizeProductMasterName(a.aliasText) === grp.normalizedKey,
+      );
+      if (aliasMatch) {
+        match = (state.products || []).find((p) => p.productId === aliasMatch.productId);
+      }
+    }
+    grp.suggestedProduct = match || null;
+  });
+
+  const groups = Array.from(unmappedGroups.values()).sort(
+    (a, b) => b.lineIds.length - a.lineIds.length || a.sampleDesc.localeCompare(b.sampleDesc),
+  );
+
+  return {
+    groups,
+    stats: {
+      unmappedCount: unmappedGroups.size,
+      mappedCount: mappedDescriptions.size,
+      mappedLines,
+      remainingLines,
+    },
+  };
+}
+
+function renderUnmappedProducts(derived) {
+  const tableBody = document.getElementById("unmappedProductsTableBody");
+  const searchInput = document.getElementById("unmappedProductSearch");
+  const readonlyNotice = document.getElementById("unmappedReadonlyNotice");
+  const readonlyNoticeText = document.getElementById("unmappedReadonlyNoticeText");
+
+  const statUnmapped = document.getElementById("statUnmappedDescriptions");
+  const statMapped = document.getElementById("statMappedDescriptions");
+  const statMappedLines = document.getElementById("statMappedLines");
+  const statRemainingLines = document.getElementById("statRemainingLines");
+
+  if (!tableBody) return;
+
+  const { groups, stats } = buildUnmappedProductsSummary();
+
+  if (statUnmapped) statUnmapped.textContent = stats.unmappedCount;
+  if (statMapped) statMapped.textContent = stats.mappedCount;
+  if (statMappedLines) statMappedLines.textContent = stats.mappedLines;
+  if (statRemainingLines) statRemainingLines.textContent = stats.remainingLines;
+
+  const isAuthAdmin = isProductMasterAuth();
+  const isAuthedNonAdmin = state.isAuthenticatedUser && !state.productMasterCanWrite;
+
+  if (readonlyNotice) {
+    if (isAuthAdmin) {
+      readonlyNotice.classList.add("hidden");
+    } else {
+      readonlyNotice.classList.remove("hidden");
+      if (readonlyNoticeText) {
+        readonlyNoticeText.textContent = isAuthedNonAdmin
+          ? "Product Master is read-only. This account does not have Procurement Admin access."
+          : "Product Master is read-only. Administrator access is required to map products.";
+      }
+    }
+  }
+
+  if (searchInput && searchInput.value !== (state.filters.unmappedProductSearch || "")) {
+    searchInput.value = state.filters.unmappedProductSearch || "";
+  }
+
+  const query = (state.filters.unmappedProductSearch || "").toLowerCase().trim();
+  let filtered = groups;
+  if (query) {
+    filtered = groups.filter((g) => {
+      const poList = Array.from(g.poNumbers).join(" ");
+      const vendorList = Array.from(g.vendorNames).join(" ");
+      const blob = `${g.sampleDesc} ${g.uom} ${poList} ${vendorList} ${g.suggestedProduct?.productCode || ""} ${g.suggestedProduct?.productName || ""}`.toLowerCase();
+      return blob.includes(query);
+    });
+  }
+
+  if (!filtered.length) {
+    tableBody.innerHTML = `<tr><td colspan="8" class="empty-state">No unmapped product descriptions found.</td></tr>`;
+    return;
+  }
+
+  tableBody.innerHTML = filtered
+    .map((grp) => {
+      const suggestionHtml = grp.suggestedProduct
+        ? `<span class="suggested-match-badge" title="Exact match: ${escapeHtml(grp.suggestedProduct.productName)}">
+             💡 ${escapeHtml(grp.suggestedProduct.productCode)} — ${escapeHtml(grp.suggestedProduct.productName)}
+           </span>`
+        : `<span class="muted-text">—</span>`;
+
+      const actionDisabled = !isAuthAdmin
+        ? `disabled title="${isAuthedNonAdmin ? 'This account does not have Procurement Admin access.' : 'Administrator access is required to map products.'}"`
+        : "";
+
+      return `
+        <tr>
+          <td>
+            <strong class="item-title">${escapeHtml(grp.sampleDesc)}</strong>
+            ${grp.allDescriptions.size > 1 ? `<span class="muted-text" style="font-size:11px;display:block;">${grp.allDescriptions.size} variant spellings</span>` : ""}
+          </td>
+          <td><span class="badge badge-uom">${escapeHtml(grp.uom || "Nos")}</span></td>
+          <td><strong>${grp.poNumbers.size}</strong> <span class="muted-text">(${grp.lineIds.length} lines)</span></td>
+          <td><strong>${grp.vendorNames.size}</strong></td>
+          <td>${formatNumber(grp.totalQty)}</td>
+          <td>${formatDate(grp.lastPurchased)}</td>
+          <td>${suggestionHtml}</td>
+          <td>
+            <div class="map-btn-group">
+              <button class="primary-btn small-btn" data-unmapped-action="map" data-unmapped-key="${escapeHtml(grp.normalizedKey)}" type="button" ${actionDisabled}>
+                Map to Existing
+              </button>
+              <button class="ghost-btn small-btn" data-unmapped-action="create" data-unmapped-key="${escapeHtml(grp.normalizedKey)}" type="button" ${actionDisabled}>
+                Create New Product
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function openMapProductModal(normalizedKey) {
+  if (!isProductMasterAuth()) {
+    alert("Product Master is read-only. Administrator access is required to map products.");
+    return;
+  }
+
+  const { groups } = buildUnmappedProductsSummary();
+  const group = groups.find((g) => g.normalizedKey === normalizedKey);
+  if (!group) return;
+
+  state.activeMappingGroup = group;
+
+  const modal = document.getElementById("mapProductModalBackdrop");
+  const form = document.getElementById("mapProductForm");
+  const sourceDesc = document.getElementById("mapSourceDescription");
+  const sourceMeta = document.getElementById("mapSourceMeta");
+  const select = document.getElementById("mapTargetProductSelect");
+  const errBox = document.getElementById("mapProductError");
+
+  if (!modal || !form || !select) return;
+
+  if (errBox) {
+    errBox.textContent = "";
+    errBox.classList.add("hidden");
+  }
+
+  if (sourceDesc) sourceDesc.textContent = group.sampleDesc;
+  if (sourceMeta) {
+    sourceMeta.textContent = `${group.lineIds.length} PO line(s) across ${group.poNumbers.size} purchase order(s)`;
+  }
+
+  const sortedProducts = [...(state.products || [])].sort((a, b) => {
+    if ((a.status || "Active") !== (b.status || "Active")) {
+      return (a.status || "Active") === "Active" ? -1 : 1;
+    }
+    return (a.productName || "").localeCompare(b.productName || "");
+  });
+
+  select.innerHTML =
+    `<option value="">-- Choose Canonical Master Product (${sortedProducts.length} available) --</option>` +
+    sortedProducts
+      .map((p) => {
+        const isSuggested = group.suggestedProduct?.productId === p.productId;
+        const tag = isSuggested ? " [Suggested Match]" : "";
+        return `<option value="${escapeHtml(p.productId)}" ${isSuggested ? "selected" : ""}>
+          ${escapeHtml(p.productCode)} — ${escapeHtml(p.productName)} (${escapeHtml(p.category || "General")})${tag}
+        </option>`;
+      })
+      .join("");
+
+  updateMapTargetPreview(select.value);
+  modal.classList.remove("hidden");
+}
+
+function updateMapTargetPreview(productId) {
+  const preview = document.getElementById("mapTargetPreview");
+  const codeEl = document.getElementById("mapTargetCode");
+  const nameEl = document.getElementById("mapTargetName");
+  const catEl = document.getElementById("mapTargetCategory");
+  if (!preview) return;
+
+  const product = (state.products || []).find((p) => p.productId === productId);
+  if (!product) {
+    preview.classList.add("hidden");
+    return;
+  }
+
+  if (codeEl) codeEl.textContent = product.productCode || "SNS-P-00000";
+  if (nameEl) nameEl.textContent = product.productName || "Product";
+  if (catEl) catEl.textContent = `${product.category || "General"}${product.brand ? " • " + product.brand : ""}`;
+  preview.classList.remove("hidden");
+}
+
+function closeMapProductModal() {
+  const modal = document.getElementById("mapProductModalBackdrop");
+  if (modal) modal.classList.add("hidden");
+  state.activeMappingGroup = null;
+}
+
+async function mapHistoricalLinesToProduct(group, targetProductId) {
+  if (!group || !targetProductId) return false;
+  const product = (state.products || []).find((p) => p.productId === targetProductId);
+  if (!product) {
+    alert("Selected target product not found.");
+    return false;
+  }
+
+  const existingAlias = (state.productAliases || []).find(
+    (a) => normalizeProductMasterName(a.aliasText) === group.normalizedKey,
+  );
+  if (existingAlias && existingAlias.productId !== targetProductId) {
+    const otherProduct = (state.products || []).find((p) => p.productId === existingAlias.productId);
+    throw new Error(
+      `Cannot map: This description is already mapped as an alias to another product (${otherProduct?.productCode || "Another Product"} - ${otherProduct?.productName || ""}).`,
+    );
+  }
+
+  if (useSupabase && supabaseClient) {
+    const { error: lineUpdateError } = await supabaseClient
+      .from("po_lines")
+      .update({ product_id: targetProductId })
+      .in("line_id", group.lineIds);
+
+    if (lineUpdateError) {
+      throw lineUpdateError;
+    }
+  }
+
+  const lineIdSet = new Set(group.lineIds);
+  baseRows.forEach((row) => {
+    if (lineIdSet.has(row.id)) {
+      row.productId = targetProductId;
+    }
+  });
+  (state.manualRows || []).forEach((row) => {
+    if (lineIdSet.has(row.id)) {
+      row.productId = targetProductId;
+    }
+  });
+  if (state.rowOverrides) {
+    Object.keys(state.rowOverrides).forEach((rowId) => {
+      if (lineIdSet.has(rowId)) {
+        state.rowOverrides[rowId] = {
+          ...state.rowOverrides[rowId],
+          productId: targetProductId,
+        };
+      }
+    });
+  }
+  saveState();
+
+  const hasAliasForTarget = (state.productAliases || []).some(
+    (a) => a.productId === targetProductId && normalizeProductMasterName(a.aliasText) === group.normalizedKey,
+  );
+
+  if (!hasAliasForTarget) {
+    await addAliasToProduct(targetProductId, group.sampleDesc);
+  }
+
+  return true;
+}
+
+async function handleMapProductForm(event) {
+  if (event) event.preventDefault();
+  const form = document.getElementById("mapProductForm");
+  const errBox = document.getElementById("mapProductError");
+  const submitBtn = document.getElementById("confirmMapProductBtn");
+  if (!form || !state.activeMappingGroup) return;
+
+  const targetProductId = form.elements.targetProductId.value;
+  if (!targetProductId) {
+    if (errBox) {
+      errBox.textContent = "Please select a canonical Master Product.";
+      errBox.classList.remove("hidden");
+    }
+    return;
+  }
+
+  if (errBox) {
+    errBox.textContent = "";
+    errBox.classList.add("hidden");
+  }
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Mapping...";
+  }
+
+  try {
+    await mapHistoricalLinesToProduct(state.activeMappingGroup, targetProductId);
+    closeMapProductModal();
+    renderAll();
+  } catch (err) {
+    if (errBox) {
+      errBox.textContent = err.message || "Failed to map historical lines.";
+      errBox.classList.remove("hidden");
+    }
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Confirm Mapping";
+    }
+  }
+}
+
+function handleCreateNewProductFromUnmapped(normalizedKey) {
+  if (!isProductMasterAuth()) {
+    alert("Product Master is read-only. Administrator access is required to create products.");
+    return;
+  }
+
+  const { groups } = buildUnmappedProductsSummary();
+  const group = groups.find((g) => g.normalizedKey === normalizedKey);
+  if (!group) return;
+
+  state.pendingHistoricalMapping = group;
+  openProductMasterModal({
+    productName: group.sampleDesc,
+    defaultUom: group.uom || "Nos",
+  });
 }
 
 function openProductMasterModal(product = null) {
@@ -7513,7 +7910,7 @@ function openProductMasterModal(product = null) {
 
   form.reset();
 
-  if (product) {
+  if (product && product.productId) {
     title.textContent = `Edit ${product.productCode || "Product"}`;
     subtext.textContent = `Update canonical specifications and attributes for ${product.productName}.`;
     form.elements.productId.value = product.productId || "";
@@ -7531,14 +7928,26 @@ function openProductMasterModal(product = null) {
     form.elements.specification.value = product.specification || "";
     form.elements.notes.value = product.notes || "";
   } else {
-    title.textContent = "Add Master Product";
-    subtext.textContent = "Define canonical product identity, specifications, and default attributes.";
+    title.textContent = state.pendingHistoricalMapping
+      ? "Create & Map Master Product"
+      : "Add Master Product";
+    subtext.textContent = state.pendingHistoricalMapping
+      ? `Create canonical product and automatically map ${state.pendingHistoricalMapping.lineIds.length} historical line(s).`
+      : "Define canonical product identity, specifications, and default attributes.";
     form.elements.productId.value = "";
     form.elements.productCode.value = "Generated on save";
     form.elements.status.value = "Active";
-    form.elements.defaultUom.value = "Nos";
+    form.elements.productName.value = product?.productName || "";
+    form.elements.category.value = product?.category || "";
+    form.elements.subcategory.value = product?.subcategory || "";
+    form.elements.brand.value = product?.brand || "";
+    form.elements.manufacturerPartNo.value = product?.manufacturerPartNo || "";
+    form.elements.defaultUom.value = product?.defaultUom || "Nos";
+    form.elements.hsnCode.value = "";
     form.elements.defaultTaxPercent.value = "18";
-    form.elements.defaultMaterialType.value = "Unknown";
+    form.elements.defaultMaterialType.value = product?.defaultMaterialType || "Unknown";
+    form.elements.specification.value = "";
+    form.elements.notes.value = "";
   }
 
   modal.classList.remove("hidden");
@@ -7547,6 +7956,7 @@ function openProductMasterModal(product = null) {
 function closeProductMasterModal() {
   const modal = document.getElementById("productMasterModalBackdrop");
   if (modal) modal.classList.add("hidden");
+  state.pendingHistoricalMapping = null;
 }
 
 async function createProduct(payload) {
@@ -7777,6 +8187,14 @@ async function saveProductMasterForm(event) {
 
     const created = await createProduct(payload);
     if (created) {
+      if (state.pendingHistoricalMapping) {
+        try {
+          await mapHistoricalLinesToProduct(state.pendingHistoricalMapping, created.productId);
+        } catch (mapErr) {
+          alert(`Product created, but mapping failed: ${mapErr.message}`);
+        }
+        state.pendingHistoricalMapping = null;
+      }
       closeProductMasterModal();
       renderAll();
     }
@@ -13121,6 +13539,50 @@ function bindProductMasterEvents() {
   document
     .getElementById("adminSignOutBtn")
     ?.addEventListener("click", handleAdminSignOut);
+
+  // Unmapped Products Events
+  const unmappedSearchInput = document.getElementById("unmappedProductSearch");
+  if (unmappedSearchInput) {
+    unmappedSearchInput.addEventListener("input", (event) => {
+      state.filters.unmappedProductSearch = event.target.value;
+      renderUnmappedProducts(buildDerived());
+    });
+  }
+
+  document
+    .getElementById("unmappedProductsTableBody")
+    ?.addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-unmapped-action]");
+      if (!btn) return;
+      const action = btn.dataset.unmappedAction;
+      const key = btn.dataset.unmappedKey;
+      if (action === "map") {
+        openMapProductModal(key);
+      } else if (action === "create") {
+        handleCreateNewProductFromUnmapped(key);
+      }
+    });
+
+  document
+    .getElementById("mapTargetProductSelect")
+    ?.addEventListener("change", (event) => {
+      updateMapTargetPreview(event.target.value);
+    });
+
+  document
+    .getElementById("closeMapProductModalBtn")
+    ?.addEventListener("click", closeMapProductModal);
+  document
+    .getElementById("cancelMapProductModalBtn")
+    ?.addEventListener("click", closeMapProductModal);
+  document
+    .getElementById("mapProductModalBackdrop")
+    ?.addEventListener("click", (event) => {
+      if (event.target.id === "mapProductModalBackdrop") closeMapProductModal();
+    });
+  document
+    .getElementById("mapProductForm")
+    ?.addEventListener("submit", handleMapProductForm);
 }
 
 function openAdminLoginModal() {

@@ -197,6 +197,7 @@
       <section class="tab-panel" id="products">
         <div class="sub-tabs-bar">
           <button class="sub-tab active" data-products-subtab="master" type="button">Master Catalog</button>
+          <button class="sub-tab" data-products-subtab="unmapped" type="button">Unmapped Products</button>
           <button class="sub-tab" data-products-subtab="historical" type="button">Historical Analytics</button>
         </div>
 
@@ -234,6 +235,61 @@
               <table>
                 <thead id="productMasterTableHead"></thead>
                 <tbody id="productMasterTableBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+
+        <div id="unmappedProductsSubPanel" class="products-subpanel hidden">
+          <article class="panel">
+            <div class="panel-header wrap">
+              <div>
+                <h2>Unmapped Products</h2>
+                <p class="section-copy">Historical purchase order line items awaiting mapping to canonical Product Master records.</p>
+              </div>
+              <div class="toolbar">
+                <input class="control-input control-wide" id="unmappedProductSearch" type="search" placeholder="Search unmapped description, PO #, vendor..." />
+              </div>
+            </div>
+
+            <div class="product-master-notice-banner" id="unmappedReadonlyNotice">
+              <span class="notice-icon">ℹ</span> <span id="unmappedReadonlyNoticeText">Product Master is read-only. Administrator access is required to map products.</span>
+            </div>
+
+            <div class="unmapped-stats-strip" id="unmappedStatsStrip">
+              <div class="unmapped-stat-card">
+                <span class="stat-label">Unmapped Descriptions</span>
+                <strong class="stat-val" id="statUnmappedDescriptions">0</strong>
+              </div>
+              <div class="unmapped-stat-card">
+                <span class="stat-label">Mapped Descriptions</span>
+                <strong class="stat-val" id="statMappedDescriptions">0</strong>
+              </div>
+              <div class="unmapped-stat-card">
+                <span class="stat-label">Mapped PO Lines</span>
+                <strong class="stat-val" id="statMappedLines">0</strong>
+              </div>
+              <div class="unmapped-stat-card">
+                <span class="stat-label">Remaining PO Lines</span>
+                <strong class="stat-val" id="statRemainingLines">0</strong>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Historical Description</th>
+                    <th>UOM</th>
+                    <th>PO Count</th>
+                    <th>Vendor Count</th>
+                    <th>Total Qty</th>
+                    <th>Last Purchased</th>
+                    <th>Suggested Match</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="unmappedProductsTableBody"></tbody>
               </table>
             </div>
           </article>
@@ -1027,6 +1083,51 @@
         <div class="form-actions">
           <button type="button" class="ghost-btn" id="cancelAdminLoginBtn">Cancel</button>
           <button type="submit" class="primary-btn" id="adminLoginSubmitBtn">Sign In</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="mapProductModalBackdrop">
+    <div class="modal-shell modal-medium map-product-modal">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">HISTORICAL PRODUCT MAPPING</p>
+          <h3>Map to Master Product</h3>
+          <p class="section-copy">Associate historical purchase order descriptions with a canonical master product.</p>
+        </div>
+        <button class="icon-btn" id="closeMapProductModalBtn" type="button" aria-label="Close">&times;</button>
+      </div>
+      <form id="mapProductForm" class="map-product-form">
+        <div class="mapping-source-card">
+          <span class="mapping-label">Historical Description</span>
+          <p class="mapping-source-text" id="mapSourceDescription">—</p>
+          <div class="mapping-meta" id="mapSourceMeta">0 lines across 0 POs</div>
+        </div>
+
+        <div id="mapProductError" class="login-error-banner hidden"></div>
+
+        <label class="field-full">
+          <span>Select Canonical Master Product</span>
+          <select class="control-input control-wide" id="mapTargetProductSelect" name="targetProductId" required>
+            <option value="">-- Choose Canonical Master Product --</option>
+          </select>
+        </label>
+
+        <div class="mapping-target-preview hidden" id="mapTargetPreview">
+          <div class="target-code-tag" id="mapTargetCode">SNS-P-00000</div>
+          <div class="target-name" id="mapTargetName">Product Name</div>
+          <div class="target-cat" id="mapTargetCategory">Category</div>
+        </div>
+
+        <label class="checkbox-line">
+          <input type="checkbox" id="mapCreateAliasCheck" name="createAlias" checked disabled />
+          <span>Automatically create product alias mapping for this historical description</span>
+        </label>
+
+        <div class="form-actions">
+          <button type="button" class="ghost-btn" id="cancelMapProductModalBtn">Cancel</button>
+          <button type="submit" class="primary-btn" id="confirmMapProductBtn">Confirm Mapping</button>
         </div>
       </form>
     </div>
