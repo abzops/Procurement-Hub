@@ -704,10 +704,17 @@ function createSupabaseClientIfReady() {
       snsConfig.supabaseUrl,
       snsConfig.supabaseAnonKey,
     );
+    if (supabaseClient?.auth?.onAuthStateChange) {
+      supabaseClient.auth.onAuthStateChange(async (event, session) => {
+        await checkSupabaseAuthSession();
+        renderAll();
+      });
+    }
   }
   useSupabase = true;
   return true;
 }
+
 
 function loadSupabaseSdk() {
   if (createSupabaseClientIfReady()) return Promise.resolve(true);
@@ -7341,23 +7348,56 @@ function renderProductMaster() {
   const statusFilter = document.getElementById("productMasterStatusFilter");
   const searchInput = document.getElementById("productMasterSearch");
   const readonlyNotice = document.getElementById("productMasterReadonlyNotice");
+  const readonlyNoticeText = document.getElementById("productMasterReadonlyNoticeText");
   const addBtn = document.getElementById("openAddProductMasterBtn");
+  const openLoginBtn = document.getElementById("openAdminLoginBtn");
+  const adminSessionInfo = document.getElementById("adminSessionInfo");
+  const adminUserTag = document.getElementById("adminUserTag");
 
   if (!tableHead || !tableBody) return;
 
-  const isAuth = isProductMasterAuth();
+  const isAuthAdmin = isProductMasterAuth();
+  const isAuthedNonAdmin = state.isAuthenticatedUser && !state.productMasterCanWrite;
 
   if (readonlyNotice) {
-    readonlyNotice.classList.toggle("hidden", isAuth);
+    if (isAuthAdmin) {
+      readonlyNotice.classList.add("hidden");
+    } else {
+      readonlyNotice.classList.remove("hidden");
+      if (readonlyNoticeText) {
+        readonlyNoticeText.textContent = isAuthedNonAdmin
+          ? "Product Master is read-only. This account does not have Procurement Admin access."
+          : "Product Master is read-only. Administrator access is required to make changes.";
+      }
+    }
+  }
+
+  if (openLoginBtn) {
+    openLoginBtn.classList.toggle("hidden", state.isAuthenticatedUser);
+  }
+
+  if (adminSessionInfo) {
+    if (state.isAuthenticatedUser) {
+      adminSessionInfo.classList.remove("hidden");
+      if (adminUserTag) {
+        const email = state.authSession?.user?.email || "User";
+        adminUserTag.textContent = isAuthAdmin ? `Admin • ${email}` : email;
+        adminUserTag.classList.toggle("non-admin", !isAuthAdmin);
+      }
+    } else {
+      adminSessionInfo.classList.add("hidden");
+    }
   }
 
   if (addBtn) {
-    if (isAuth) {
+    if (isAuthAdmin) {
       addBtn.removeAttribute("disabled");
       addBtn.removeAttribute("title");
     } else {
       addBtn.setAttribute("disabled", "true");
-      addBtn.setAttribute("title", "Product Master is read-only. Administrator access is required to make changes.");
+      addBtn.setAttribute("title", isAuthedNonAdmin
+        ? "This account does not have Procurement Admin access."
+        : "Product Master is read-only. Administrator access is required to make changes.");
     }
   }
 
@@ -7823,7 +7863,15 @@ function renderProductMasterDetailContent(product) {
   if (aliasesSec) aliasesSec.classList.toggle("hidden", isOverview);
 
   const isAuth = isProductMasterAuth();
-  if (aliasNotice) aliasNotice.classList.toggle("hidden", isAuth);
+  const isAuthedNonAdmin = state.isAuthenticatedUser && !state.productMasterCanWrite;
+  if (aliasNotice) {
+    aliasNotice.classList.toggle("hidden", isAuth);
+    aliasNotice.innerHTML = `<span class="notice-icon">ℹ</span> ${
+      isAuthedNonAdmin
+        ? "Alias editing is read-only. This account does not have Procurement Admin access."
+        : "Alias editing is read-only. Administrator access is required to add or remove aliases."
+    }`;
+  }
   if (addAliasForm) addAliasForm.classList.toggle("hidden", !isAuth);
 
   if (overviewMount) {
@@ -13052,6 +13100,111 @@ function bindProductMasterEvents() {
         removeAlias(btn.dataset.aliasId);
       }
     });
+
+  document
+    .getElementById("openAdminLoginBtn")
+    ?.addEventListener("click", openAdminLoginModal);
+  document
+    .getElementById("closeAdminLoginModalBtn")
+    ?.addEventListener("click", closeAdminLoginModal);
+  document
+    .getElementById("cancelAdminLoginBtn")
+    ?.addEventListener("click", closeAdminLoginModal);
+  document
+    .getElementById("adminLoginModalBackdrop")
+    ?.addEventListener("click", (event) => {
+      if (event.target.id === "adminLoginModalBackdrop") closeAdminLoginModal();
+    });
+  document
+    .getElementById("adminLoginForm")
+    ?.addEventListener("submit", handleAdminSignInForm);
+  document
+    .getElementById("adminSignOutBtn")
+    ?.addEventListener("click", handleAdminSignOut);
+}
+
+function openAdminLoginModal() {
+  const modal = document.getElementById("adminLoginModalBackdrop");
+  const form = document.getElementById("adminLoginForm");
+  const errBox = document.getElementById("adminLoginError");
+  if (!modal || !form) return;
+  form.reset();
+  if (errBox) {
+    errBox.textContent = "";
+    errBox.classList.add("hidden");
+  }
+  modal.classList.remove("hidden");
+  const emailInput = document.getElementById("adminLoginEmail");
+  if (emailInput) emailInput.focus();
+}
+
+function closeAdminLoginModal() {
+  const modal = document.getElementById("adminLoginModalBackdrop");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function handleAdminSignInForm(event) {
+  if (event) event.preventDefault();
+  const form = document.getElementById("adminLoginForm");
+  const errBox = document.getElementById("adminLoginError");
+  const submitBtn = document.getElementById("adminLoginSubmitBtn");
+  if (!form) return;
+
+  const email = cleanText(form.elements.email.value);
+  const password = form.elements.password.value;
+  if (!email || !password) return;
+
+  if (errBox) {
+    errBox.textContent = "";
+    errBox.classList.add("hidden");
+  }
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Signing In...";
+  }
+
+  try {
+    if (!useSupabase || !supabaseClient?.auth) {
+      throw new Error("Supabase authentication is not configured.");
+    }
+
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      if (errBox) {
+        errBox.textContent = error.message || "Invalid login credentials.";
+        errBox.classList.remove("hidden");
+      }
+      return;
+    }
+
+    closeAdminLoginModal();
+    await checkSupabaseAuthSession();
+    renderAll();
+  } catch (err) {
+    if (errBox) {
+      errBox.textContent = err.message || "An unexpected error occurred.";
+      errBox.classList.remove("hidden");
+    }
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Sign In";
+    }
+  }
+}
+
+async function handleAdminSignOut() {
+  if (useSupabase && supabaseClient?.auth) {
+    await supabaseClient.auth.signOut();
+  }
+  state.authSession = null;
+  state.isAuthenticatedUser = false;
+  state.productMasterCanWrite = false;
+  renderAll();
 }
 
 async function init() {
