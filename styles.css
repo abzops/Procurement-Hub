@@ -5270,3 +5270,118 @@ button[disabled] {
   gap: 14px;
   padding: 16px 20px 20px;
 }
+
+.procurement-kpis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.procurement-kpi-card {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.procurement-kpi-card .kpi-label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+}
+
+.procurement-kpi-card .kpi-val {
+  font-size: 17px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.procurement-kpi-card.highlight {
+  border-color: rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.procurement-intel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.intel-block {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.intel-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.intel-block-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin: 0;
+}
+
+.price-chart-container {
+  width: 100%;
+  height: 140px;
+  position: relative;
+  margin-bottom: 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 6px;
+  padding: 10px 14px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.price-chart-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.empty-history-card {
+  text-align: center;
+  padding: 36px 20px;
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+}
+
+.empty-history-card .empty-icon {
+  font-size: 32px;
+  margin-bottom: 10px;
+}
+
+.empty-history-card h4 {
+  font-size: 16px;
+  color: #f1f5f9;
+  margin: 0 0 6px;
+}
+
+.po-link-btn {
+  background: none;
+  border: none;
+  color: #60a5fa;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.po-link-btn:hover {
+  color: #93c5fd;
+}

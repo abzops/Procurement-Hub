@@ -24,10 +24,11 @@ const PRODUCT_MASTER_COLUMNS = [
   { key: "productCode", label: "Product Code" },
   { key: "productName", label: "Product Name" },
   { key: "category", label: "Category" },
-  { key: "brand", label: "Brand / Make" },
-  { key: "manufacturerPartNo", label: "Part #" },
   { key: "defaultUom", label: "UOM" },
-  { key: "defaultTaxPercent", label: "Tax %" },
+  { key: "vendorCount", label: "Vendors" },
+  { key: "lastPrice", label: "Last Price" },
+  { key: "avgPrice", label: "Avg Price" },
+  { key: "lastPurchased", label: "Last Purchased" },
   { key: "status", label: "Status" },
   { key: "actions", label: "Actions" },
 ];
@@ -7457,13 +7458,15 @@ function renderProductMaster() {
   renderTableHead("productMasterTableHead", PRODUCT_MASTER_COLUMNS);
 
   if (!filtered.length) {
-    tableBody.innerHTML = `<tr><td colspan="9" class="empty-state">No master products found matching the criteria.</td></tr>`;
+    tableBody.innerHTML = `<tr><td colspan="10" class="empty-state">No master products found matching the criteria.</td></tr>`;
     return;
   }
 
+  const allDataRows = allRows();
   tableBody.innerHTML = filtered
     .map((p) => {
       const statusClass = (p.status || "Active") === "Active" ? "status-active" : "status-inactive";
+      const intel = getProductProcurementMetrics(p.productId, allDataRows);
       const actionButtons = isAuth
         ? `
             <button class="ghost-btn small-btn" data-product-master-action="details" data-product-id="${escapeHtml(p.productId)}" type="button">Details</button>
@@ -7474,15 +7477,21 @@ function renderProductMaster() {
             <button class="ghost-btn small-btn" data-product-master-action="details" data-product-id="${escapeHtml(p.productId)}" type="button">Details</button>
           `;
 
+      const vendorCountDisplay = intel.hasHistory ? String(intel.kpis.vendorCount) : `<span class="muted-text">—</span>`;
+      const lastPriceDisplay = intel.hasHistory ? money(intel.kpis.lastPrice) : `<span class="muted-text">—</span>`;
+      const avgPriceDisplay = intel.hasHistory ? money(intel.kpis.avgPrice) : `<span class="muted-text">—</span>`;
+      const lastPurchasedDisplay = intel.hasHistory ? formatDate(intel.kpis.lastDate) : `<span class="muted-text">—</span>`;
+
       return `
         <tr class="row-selectable" data-product-id="${escapeHtml(p.productId)}">
           <td><span class="product-code-tag">${escapeHtml(p.productCode || "—")}</span></td>
           <td><strong>${escapeHtml(p.productName)}</strong></td>
           <td>${escapeHtml(p.category || "—")}</td>
-          <td>${escapeHtml(p.brand || "—")}</td>
-          <td>${escapeHtml(p.manufacturerPartNo || "—")}</td>
-          <td>${escapeHtml(p.defaultUom || "Nos")}</td>
-          <td>${p.defaultTaxPercent != null ? `${p.defaultTaxPercent}%` : "18%"}</td>
+          <td><span class="badge badge-uom">${escapeHtml(p.defaultUom || "Nos")}</span></td>
+          <td>${vendorCountDisplay}</td>
+          <td><strong>${lastPriceDisplay}</strong></td>
+          <td>${avgPriceDisplay}</td>
+          <td>${lastPurchasedDisplay}</td>
           <td><span class="badge ${statusClass}">${escapeHtml(p.status || "Active")}</span></td>
           <td>
             <div class="action-stack" style="flex-direction:row;gap:6px;min-width:${isAuth ? "210px" : "90px"};">
@@ -7493,6 +7502,98 @@ function renderProductMaster() {
       `;
     })
     .join("");
+}
+
+function getProductProcurementMetrics(productId, rows = allRows()) {
+  if (!productId) return { hasHistory: false, lines: [], vendorStats: [], kpis: null };
+
+  const lines = rows.filter((row) => {
+    if (row.productId !== productId) return false;
+    if (row.isCharge || row.lineType === "charge") return false;
+    if (row.poStatus === "Cancelled" || row.__deleted) return false;
+    return true;
+  });
+
+  if (!lines.length) {
+    return { hasHistory: false, lines: [], vendorStats: [], kpis: null };
+  }
+
+  // Sort newest first
+  lines.sort((a, b) => new Date(b.poDate || 0).getTime() - new Date(a.poDate || 0).getTime());
+
+  const lastLine = lines[0];
+  const lastPrice = number(lastLine.itemPrice);
+  const lastDate = lastLine.poDate || "";
+
+  const validPrices = lines.map((l) => number(l.itemPrice)).filter((p) => p > 0);
+  const lowestPrice = validPrices.length ? Math.min(...validPrices) : lastPrice;
+  const highestPrice = validPrices.length ? Math.max(...validPrices) : lastPrice;
+
+  const totalQty = lines.reduce((sum, l) => sum + number(l.quantityOrdered), 0);
+  const totalSpend = lines.reduce(
+    (sum, l) => sum + (number(l.itemTotal) || number(l.itemPrice) * number(l.quantityOrdered)),
+    0,
+  );
+  const avgPrice = totalQty > 0 ? totalSpend / totalQty : (validPrices.reduce((a, b) => a + b, 0) / validPrices.length || 0);
+
+  const poNumbers = new Set(lines.map((l) => l.poNumber).filter(Boolean));
+
+  const vendorMap = new Map();
+  lines.forEach((line) => {
+    const vName = cleanText(line.vendorName) || "Unknown Vendor";
+    if (!vendorMap.has(vName)) {
+      vendorMap.set(vName, {
+        vendorName: vName,
+        lines: [],
+        totalQty: 0,
+        totalSpend: 0,
+        lastPrice: number(line.itemPrice),
+        lastDate: line.poDate || "",
+        poNumbers: new Set(),
+      });
+    }
+    const v = vendorMap.get(vName);
+    v.lines.push(line);
+    v.totalQty += number(line.quantityOrdered);
+    v.totalSpend += number(line.itemTotal) || number(line.itemPrice) * number(line.quantityOrdered);
+    if (line.poNumber) v.poNumbers.add(line.poNumber);
+    if (new Date(line.poDate || 0).getTime() > new Date(v.lastDate || 0).getTime()) {
+      v.lastDate = line.poDate;
+      v.lastPrice = number(line.itemPrice);
+    }
+  });
+
+  const vendorStats = Array.from(vendorMap.values()).map((v) => {
+    const prices = v.lines.map((l) => number(l.itemPrice)).filter((p) => p > 0);
+    const lowestPrice = prices.length ? Math.min(...prices) : v.lastPrice;
+    const avgPrice = v.totalQty > 0 ? v.totalSpend / v.totalQty : (prices.reduce((a, b) => a + b, 0) / prices.length || 0);
+    return {
+      vendorName: v.vendorName,
+      lastPrice: v.lastPrice,
+      lowestPrice,
+      avgPrice,
+      totalQty: v.totalQty,
+      poCount: v.poNumbers.size,
+      lastDate: v.lastDate,
+    };
+  });
+
+  return {
+    hasHistory: true,
+    lines,
+    vendorStats,
+    kpis: {
+      lastPrice,
+      lowestPrice,
+      highestPrice,
+      avgPrice,
+      totalQty,
+      totalSpend,
+      poCount: poNumbers.size,
+      vendorCount: vendorMap.size,
+      lastDate,
+    },
+  };
 }
 
 function renderProductsWorkspace(derived) {
@@ -8263,22 +8364,116 @@ function closeProductMasterDetailModal() {
   if (modal) modal.classList.add("hidden");
 }
 
+function renderPriceTrendSvg(lines) {
+  if (!lines || lines.length === 0) {
+    return `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:12px;color:#94a3b8;">No price data</div>`;
+  }
+
+  if (lines.length === 1) {
+    const l = lines[0];
+    return `
+      <div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:12px;color:#94a3b8;text-align:center;">
+        Single purchase record: ${formatDate(l.poDate)} @ ${money(l.itemPrice)} (${formatNumber(l.quantityOrdered)} ${escapeHtml(l.uom || "Nos")}) from ${escapeHtml(l.vendorName)}
+      </div>
+    `;
+  }
+
+  // Sort chronologically (oldest first)
+  const chronLines = [...lines].sort((a, b) => new Date(a.poDate || 0).getTime() - new Date(b.poDate || 0).getTime());
+  const prices = chronLines.map((l) => number(l.itemPrice)).filter((p) => p > 0);
+  if (!prices.length) return "";
+
+  const minP = Math.min(...prices);
+  const maxP = Math.max(...prices);
+  const rangeP = maxP - minP;
+  const paddingP = rangeP > 0 ? rangeP * 0.15 : (maxP * 0.1 || 1);
+  const yMin = Math.max(0, minP - paddingP);
+  const yMax = maxP + paddingP;
+  const yRange = yMax - yMin || 1;
+
+  const width = 600;
+  const height = 110;
+  const padLeft = 70;
+  const padRight = 30;
+  const padTop = 15;
+  const padBottom = 22;
+  const chartW = width - padLeft - padRight;
+  const chartH = height - padTop - padBottom;
+
+  const points = chronLines.map((l, i) => {
+    const x = padLeft + (chronLines.length > 1 ? (i / (chronLines.length - 1)) * chartW : chartW / 2);
+    const y = padTop + chartH - ((number(l.itemPrice) - yMin) / yRange) * chartH;
+    return { x, y, line: l };
+  });
+
+  const pathD = points.map((pt, i) => `${i === 0 ? "M" : "L"} ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(" ");
+  const areaD = `${pathD} L ${points[points.length - 1].x.toFixed(1)} ${(padTop + chartH).toFixed(1)} L ${points[0].x.toFixed(1)} ${(padTop + chartH).toFixed(1)} Z`;
+
+  const circles = points
+    .map(
+      (pt) => `
+      <circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="4.5" fill="#3b82f6" stroke="#0f172a" stroke-width="2">
+        <title>${escapeHtml(formatDate(pt.line.poDate))} • ${escapeHtml(pt.line.vendorName)}: ${money(pt.line.itemPrice)} (${formatNumber(pt.line.quantityOrdered)} ${escapeHtml(pt.line.uom || "Nos")})</title>
+      </circle>
+    `,
+    )
+    .join("");
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" class="price-chart-svg" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.3"/>
+          <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.0"/>
+        </linearGradient>
+      </defs>
+      <!-- Grid lines -->
+      <line x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}" stroke="rgba(255,255,255,0.08)" stroke-dasharray="3,3" />
+      <line x1="${padLeft}" y1="${padTop + chartH / 2}" x2="${width - padRight}" y2="${padTop + chartH / 2}" stroke="rgba(255,255,255,0.05)" stroke-dasharray="3,3" />
+      <line x1="${padLeft}" y1="${padTop + chartH}" x2="${width - padRight}" y2="${padTop + chartH}" stroke="rgba(255,255,255,0.1)" />
+
+      <!-- Y Axis Labels -->
+      <text x="${padLeft - 8}" y="${padTop + 4}" fill="#94a3b8" font-size="10" text-anchor="end">${money(maxP)}</text>
+      <text x="${padLeft - 8}" y="${padTop + chartH + 3}" fill="#94a3b8" font-size="10" text-anchor="end">${money(minP)}</text>
+
+      <!-- X Axis Labels -->
+      <text x="${padLeft}" y="${height - 4}" fill="#94a3b8" font-size="10" text-anchor="start">${formatDate(chronLines[0].poDate)}</text>
+      <text x="${width - padRight}" y="${height - 4}" fill="#94a3b8" font-size="10" text-anchor="end">${formatDate(chronLines[chronLines.length - 1].poDate)}</text>
+
+      <!-- Area & Line -->
+      <path d="${areaD}" fill="url(#priceGrad)" />
+      <path d="${pathD}" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+      ${circles}
+    </svg>
+  `;
+}
+
 function renderProductMasterDetailContent(product) {
   const overviewMount = document.getElementById("productDetailOverviewContent");
+  const procurementMount = document.getElementById("productDetailProcurementContent");
   const aliasesMount = document.getElementById("aliasChipsList");
   const aliasCountBadge = document.getElementById("aliasCountBadge");
   const overviewTabBtn = document.getElementById("pDetailTabOverview");
+  const procurementTabBtn = document.getElementById("pDetailTabProcurement");
   const aliasesTabBtn = document.getElementById("pDetailTabAliases");
   const overviewSec = document.getElementById("productDetailOverviewSection");
+  const procurementSec = document.getElementById("productDetailProcurementSection");
   const aliasesSec = document.getElementById("productDetailAliasesSection");
   const aliasNotice = document.getElementById("aliasReadonlyNotice");
   const addAliasForm = document.getElementById("addAliasForm");
 
-  const isOverview = state.selectedMasterDetailTab === "overview";
+  const currentTab = state.selectedMasterDetailTab || "overview";
+  const isOverview = currentTab === "overview";
+  const isProcurement = currentTab === "procurement";
+  const isAliases = currentTab === "aliases";
+
   if (overviewTabBtn) overviewTabBtn.classList.toggle("active", isOverview);
-  if (aliasesTabBtn) aliasesTabBtn.classList.toggle("active", !isOverview);
+  if (procurementTabBtn) procurementTabBtn.classList.toggle("active", isProcurement);
+  if (aliasesTabBtn) aliasesTabBtn.classList.toggle("active", isAliases);
+
   if (overviewSec) overviewSec.classList.toggle("hidden", !isOverview);
-  if (aliasesSec) aliasesSec.classList.toggle("hidden", isOverview);
+  if (procurementSec) procurementSec.classList.toggle("hidden", !isProcurement);
+  if (aliasesSec) aliasesSec.classList.toggle("hidden", !isAliases);
 
   const isAuth = isProductMasterAuth();
   const isAuthedNonAdmin = state.isAuthenticatedUser && !state.productMasterCanWrite;
@@ -8292,6 +8487,7 @@ function renderProductMasterDetailContent(product) {
   }
   if (addAliasForm) addAliasForm.classList.toggle("hidden", !isAuth);
 
+  // 1. Overview Tab
   if (overviewMount) {
     overviewMount.innerHTML = `
       <div class="product-overview-grid">
@@ -8351,6 +8547,207 @@ function renderProductMasterDetailContent(product) {
     `;
   }
 
+  // 2. Procurement Intelligence Tab
+  if (procurementMount) {
+    const intel = getProductProcurementMetrics(product.productId, allRows());
+
+    if (!intel.hasHistory) {
+      procurementMount.innerHTML = `
+        <div class="empty-history-card">
+          <div class="empty-icon">📊</div>
+          <h4>No Mapped Purchase History Yet</h4>
+          <p class="section-copy">No historical purchase order lines are currently mapped to this canonical product. Map historical descriptions in the Unmapped Products tab to unlock procurement intelligence, price trends, and vendor comparisons.</p>
+        </div>
+      `;
+    } else {
+      const k = intel.kpis;
+
+      // Vendor Comparison Sorting
+      const vSort = state.vendorComparisonSort || "lastDate-desc";
+      let sortedVendors = [...intel.vendorStats];
+      if (vSort === "lastPrice-asc") {
+        sortedVendors.sort((a, b) => a.lastPrice - b.lastPrice);
+      } else if (vSort === "lastPrice-desc") {
+        sortedVendors.sort((a, b) => b.lastPrice - a.lastPrice);
+      } else if (vSort === "avgPrice-asc") {
+        sortedVendors.sort((a, b) => a.avgPrice - b.avgPrice);
+      } else if (vSort === "avgPrice-desc") {
+        sortedVendors.sort((a, b) => b.avgPrice - a.avgPrice);
+      } else {
+        sortedVendors.sort((a, b) => new Date(b.lastDate || 0).getTime() - new Date(a.lastDate || 0).getTime());
+      }
+
+      const vendorTableRows = sortedVendors
+        .map(
+          (v) => `
+        <tr>
+          <td><strong>${escapeHtml(v.vendorName)}</strong></td>
+          <td><strong>${money(v.lastPrice)}</strong></td>
+          <td>${money(v.lowestPrice)}</td>
+          <td>${money(v.avgPrice)}</td>
+          <td>${formatNumber(v.totalQty)} <span class="muted-text">${escapeHtml(product.defaultUom || "Nos")}</span></td>
+          <td>${v.poCount}</td>
+          <td>${formatDate(v.lastDate)}</td>
+        </tr>
+      `,
+        )
+        .join("");
+
+      // Purchase History Table
+      const historyTableRows = intel.lines
+        .map((line) => {
+          const lineTotal = number(line.itemTotal) || number(line.itemPrice) * number(line.quantityOrdered);
+          return `
+          <tr>
+            <td>
+              <button class="po-link-btn" data-action="view-po-from-product-intel" data-po="${escapeHtml(line.poNumber)}" type="button">
+                ${escapeHtml(line.poNumber)}
+              </button>
+            </td>
+            <td>${formatDate(line.poDate)}</td>
+            <td><strong>${escapeHtml(line.vendorName)}</strong></td>
+            <td>${formatNumber(line.quantityOrdered)}</td>
+            <td><span class="badge badge-uom">${escapeHtml(line.uom || product.defaultUom || "Nos")}</span></td>
+            <td><strong>${money(line.itemPrice)}</strong></td>
+            <td>${line.itemTaxPercent != null ? `${line.itemTaxPercent}%` : "—"}</td>
+            <td>${money(lineTotal)}</td>
+          </tr>
+        `;
+        })
+        .join("");
+
+      procurementMount.innerHTML = `
+        <div class="procurement-intel-section">
+          <!-- KPI Summary Strip -->
+          <div class="procurement-kpis-grid">
+            <div class="procurement-kpi-card highlight">
+              <span class="kpi-label">Last Purchase Price</span>
+              <strong class="kpi-val">${money(k.lastPrice)}</strong>
+            </div>
+            <div class="procurement-kpi-card">
+              <span class="kpi-label">Lowest Price</span>
+              <strong class="kpi-val">${money(k.lowestPrice)}</strong>
+            </div>
+            <div class="procurement-kpi-card">
+              <span class="kpi-label">Highest Price</span>
+              <strong class="kpi-val">${money(k.highestPrice)}</strong>
+            </div>
+            <div class="procurement-kpi-card highlight">
+              <span class="kpi-label">Average Price</span>
+              <strong class="kpi-val">${money(k.avgPrice)}</strong>
+            </div>
+            <div class="procurement-kpi-card">
+              <span class="kpi-label">Total Purchased Qty</span>
+              <strong class="kpi-val">${formatNumber(k.totalQty)} <span style="font-size:12px;color:#94a3b8;">${escapeHtml(product.defaultUom || "Nos")}</span></strong>
+            </div>
+            <div class="procurement-kpi-card">
+              <span class="kpi-label">Total Spend</span>
+              <strong class="kpi-val">${money(k.totalSpend)}</strong>
+            </div>
+            <div class="procurement-kpi-card">
+              <span class="kpi-label">Number of POs</span>
+              <strong class="kpi-val">${k.poCount}</strong>
+            </div>
+            <div class="procurement-kpi-card">
+              <span class="kpi-label">Number of Vendors</span>
+              <strong class="kpi-val">${k.vendorCount}</strong>
+            </div>
+            <div class="procurement-kpi-card">
+              <span class="kpi-label">Last Purchased Date</span>
+              <strong class="kpi-val" style="font-size:15px;">${formatDate(k.lastDate)}</strong>
+            </div>
+          </div>
+
+          <!-- Price Trend Chart -->
+          <div class="intel-block">
+            <div class="intel-block-header">
+              <h4 class="intel-block-title">Price Trend & Purchase Timeline</h4>
+              <span class="muted-text" style="font-size:12px;">${intel.lines.length} purchase event${intel.lines.length === 1 ? "" : "s"}</span>
+            </div>
+            <div class="price-chart-container">
+              ${renderPriceTrendSvg(intel.lines)}
+            </div>
+          </div>
+
+          <!-- Vendor Comparison Table -->
+          <div class="intel-block">
+            <div class="intel-block-header">
+              <h4 class="intel-block-title">Vendor Comparison (${intel.vendorStats.length} Vendors)</h4>
+              <div class="toolbar" style="margin:0;">
+                <label style="font-size:12px;display:flex;align-items:center;gap:6px;">
+                  <span class="muted-text">Sort:</span>
+                  <select class="control-input" id="vendorComparisonSortSelect" style="padding:4px 8px;font-size:12px;">
+                    <option value="lastDate-desc" ${vSort === "lastDate-desc" ? "selected" : ""}>Most Recent</option>
+                    <option value="lastPrice-asc" ${vSort === "lastPrice-asc" ? "selected" : ""}>Lowest Last Price</option>
+                    <option value="lastPrice-desc" ${vSort === "lastPrice-desc" ? "selected" : ""}>Highest Last Price</option>
+                    <option value="avgPrice-asc" ${vSort === "avgPrice-asc" ? "selected" : ""}>Lowest Average Price</option>
+                    <option value="avgPrice-desc" ${vSort === "avgPrice-desc" ? "selected" : ""}>Highest Average Price</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Vendor</th>
+                    <th>Last Price</th>
+                    <th>Lowest Price</th>
+                    <th>Average Price</th>
+                    <th>Total Qty Purchased</th>
+                    <th>PO Count</th>
+                    <th>Last Purchase Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${vendorTableRows}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Purchase History Table -->
+          <div class="intel-block">
+            <div class="intel-block-header">
+              <h4 class="intel-block-title">Purchase History (${intel.lines.length} Records)</h4>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>PO Number</th>
+                    <th>PO Date</th>
+                    <th>Vendor</th>
+                    <th>Quantity</th>
+                    <th>UOM</th>
+                    <th>Unit Price</th>
+                    <th>Tax %</th>
+                    <th>Line Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${historyTableRows}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Vendor Metrics Link -->
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:rgba(30,41,59,0.5);border-radius:6px;border:1px solid rgba(255,255,255,0.06);flex-wrap:wrap;gap:10px;">
+            <div>
+              <strong style="font-size:13px;color:#f1f5f9;">Quoted Vendor Metrics & Lead Times</strong>
+              <p class="section-copy" style="margin:2px 0 0;font-size:12px;">Review quoted unit rates, historical best prices, and lead time metrics in Vendor Metrics.</p>
+            </div>
+            <button class="ghost-btn small-btn" data-action="open-product-vendor-metrics" data-product-name="${escapeHtml(product.productName)}" type="button">
+              Open Vendor Metrics →
+            </button>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  // 3. Aliases Tab
   const aliases = (state.productAliases || []).filter((a) => a.productId === product.productId);
   if (aliasCountBadge) aliasCountBadge.textContent = String(aliases.length);
 
@@ -13496,6 +13893,38 @@ function bindProductMasterEvents() {
     .getElementById("productMasterDetailModalBackdrop")
     ?.addEventListener("click", (event) => {
       if (event.target.id === "productMasterDetailModalBackdrop") closeProductMasterDetailModal();
+    });
+
+  document
+    .getElementById("productDetailProcurementContent")
+    ?.addEventListener("click", (event) => {
+      const poBtn = event.target.closest('[data-action="view-po-from-product-intel"]');
+      if (poBtn && poBtn.dataset.po) {
+        closeProductMasterDetailModal();
+        openProductDetailModal(poBtn.dataset.po);
+        return;
+      }
+      const metricBtn = event.target.closest('[data-action="open-product-vendor-metrics"]');
+      if (metricBtn && metricBtn.dataset.productName) {
+        closeProductMasterDetailModal();
+        state.activeTab = "products";
+        state.productsSubTab = "historical";
+        state.filters.productSearch = metricBtn.dataset.productName;
+        renderAll();
+        return;
+      }
+    });
+
+  document
+    .getElementById("productDetailProcurementContent")
+    ?.addEventListener("change", (event) => {
+      if (event.target.id === "vendorComparisonSortSelect") {
+        state.vendorComparisonSort = event.target.value;
+        if (state.selectedMasterProductId) {
+          const product = (state.products || []).find((p) => p.productId === state.selectedMasterProductId);
+          if (product) renderProductMasterDetailContent(product);
+        }
+      }
     });
 
   document
