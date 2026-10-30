@@ -146,7 +146,8 @@ const PROCUREMENT_REPORT_COLUMNS = [
   { key: "uom", label: "UOM", type: "text", width: 10 },
   { key: "qtyInt", label: "Qty Int", type: "number", width: 10 },
   { key: "poDate", label: "PO Date", type: "date", width: 14 },
-  { key: "deliveryDate", label: "Delivery Date", type: "date", width: 14 },
+  { key: "deliveryDate", label: "Expected Delivery Date", type: "date", width: 18 },
+  { key: "deliveredDate", label: "Delivered Date", type: "date", width: 18 },
   { key: "materialType", label: "Material Type", type: "text", width: 18 },
   { key: "unitRate", label: "Unit Rate", type: "money", width: 14 },
   { key: "taxPercent", label: "Tax %", type: "percent", width: 10 },
@@ -662,6 +663,7 @@ const state = {
   editingPoKey: null,
   showMetricVendorForm: false,
   showProcurementReport: false,
+  procurementReportTab: "PO Summary",
   showMechanicalAnalysis: false,
   showProcurementAudit: false,
   mechanicalAnalysisTab: "Dashboard",
@@ -669,6 +671,7 @@ const state = {
   procurementAuditEditingId: null,
   filters: {
     poSearch: "",
+    poPeriod: "all",
     poVendor: "all",
     poPayment: "all",
     poStatus: "all",
@@ -4440,7 +4443,7 @@ function isAcknowledgementFollowup(row = {}) {
 }
 
 function getCurrentFollowupForPo(po, asOfDate = todayDateOnly()) {
-  if (!po || normalizeDeliveryStatus(po.deliveryStatus) === "Delivered")
+  if (!po || isPoFulfilledOrClosed(po))
     return null;
   const poDate = parseDateOnly(po.poDate);
   const deliveryDate = parseDateOnly(po.deliveryDate);
@@ -4652,6 +4655,10 @@ function buildFollowupCards(pos = []) {
       row.po_number || row.poNumber || poFallback?.poNumber,
     );
     if (!poNumber) return;
+    const linkedPo = poFallback || poMap.get(poNumber);
+    // Keep completion history, but never offer outstanding actions for finished POs.
+    if (linkedPo && isPoFulfilledOrClosed(linkedPo) &&
+        !normalizeKey(row.status).includes("COMPLETE")) return;
     const enriched = enrichFollowupRowForCard(
       row,
       poFallback || poMap.get(poNumber) || {},
@@ -6292,6 +6299,48 @@ function activePOs(pos) {
   });
 }
 
+function isPoFulfilledOrClosed(po) {
+  return normalizeDeliveryStatus(po.deliveryStatus) === "Delivered" ||
+    ["CLOSED", "CANCELLED"].includes(normalizeKey(po.poStatus));
+}
+
+function matchesPoPeriod(po, period = "all", today = todayDateOnly()) {
+  if (period === "all") return true;
+  const date = parseDateOnly(po.poDate);
+  if (!date) return false;
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  if (period === "month") {
+    start.setDate(1);
+    end.setFullYear(start.getFullYear(), start.getMonth() + 1, 1);
+  } else if (period === "week") {
+    start.setDate(start.getDate() - (start.getDay() + 6) % 7);
+    end.setTime(start.getTime());
+    end.setDate(end.getDate() + 7);
+  }
+  return date >= start && date < end;
+}
+
+function vendorPoTotals(pos) {
+  const totals = new Map();
+  pos.forEach((po) => {
+    const vendorName = cleanText(po.vendorName) || "Unknown Vendor";
+    totals.set(vendorName, (totals.get(vendorName) || 0) + number(po.poTotal));
+  });
+  return Array.from(totals, ([vendorName, totalSpend]) => ({ vendorName, totalSpend }));
+}
+
+function onTimeDeliveryRate(pos) {
+  const delivered = pos.filter((po) =>
+    normalizeDeliveryStatus(po.deliveryStatus) === "Delivered" &&
+    parseDateOnly(po.deliveryDate) && parseDateOnly(po.deliveredDate));
+  if (!delivered.length) return null;
+  const onTime = delivered.filter((po) =>
+    parseDateOnly(po.deliveredDate) <= parseDateOnly(po.deliveryDate)).length;
+  return Math.round(onTime / delivered.length * 100);
+}
+
 function getDeliveryDate(po) {
   return parseDateOnly(po?.deliveryDate);
 }
@@ -6583,13 +6632,14 @@ function renderCommandKpis({ pos }) {
 }
 
 function renderCommandOverview({ pos, vendors }) {
+  const vendorTotals = vendorPoTotals(pos);
   const maxSpend =
-    Math.max(...vendors.map((vendor) => vendor.totalSpend), 0) || 1;
-  const totalVendorSpend = vendors.reduce(
+    Math.max(...vendorTotals.map((vendor) => vendor.totalSpend), 0) || 1;
+  const totalVendorSpend = vendorTotals.reduce(
     (sum, vendor) => sum + number(vendor.totalSpend),
     0,
   );
-  const topVendors = sortData(vendors, "totalSpend-desc").slice(0, 5);
+  const topVendors = sortData(vendorTotals, "totalSpend-desc").slice(0, 5);
 
   document.getElementById("vendorSpendBars").innerHTML =
     topVendors
@@ -6747,9 +6797,7 @@ function renderQuickInsights(pos, vendors) {
     ? datedLeadTimes.reduce((sum, value) => sum + value, 0) /
       datedLeadTimes.length
     : 0;
-  const onTimeRate = pos.length
-    ? Math.round(((pos.length - delayedPOs(pos).length) / pos.length) * 100)
-    : 0;
+  const onTimeRate = onTimeDeliveryRate(pos);
   const delayVendorCounts = countBy(delayedPOs(pos), (po) => po.vendorName);
   const mostDelayedVendor =
     Object.entries(delayVendorCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ||
@@ -6760,7 +6808,7 @@ function renderQuickInsights(pos, vendors) {
   );
   const insights = [
     ["Average Lead Time", `${avgLeadTime.toFixed(1)} Days`],
-    ["On-Time Delivery Rate", `${onTimeRate}%`],
+    ["On-Time Delivery Rate", onTimeRate === null ? "Not Captured" : `${onTimeRate}%`],
     ["Most Delayed Vendor", mostDelayedVendor],
     ["Total Vendors", formatNumber(vendors.length)],
     ["Active POs Value", compactMoney(activeValue)],
@@ -7274,6 +7322,7 @@ function renderPurchaseOrders({ pos }) {
   setSelectOptions("poSortSelect", PO_SORTS, state.filters.poSort);
 
   let filtered = pos.filter((po) => {
+    if (!matchesPoPeriod(po, state.filters.poPeriod)) return false;
     const search = state.filters.poSearch.toLowerCase();
     if (search && !po.searchBlob.includes(search)) return false;
     if (
@@ -10272,16 +10321,21 @@ function buildProcurementReportRows(derived = buildDerived()) {
         qtyInt: Number.isFinite(qty) ? Math.trunc(qty) : "",
         poDate: cleanText(row.poDate || po.poDate),
         deliveryDate: cleanText(row.deliveryDate || po.deliveryDate),
+        deliveredDate: cleanText(row.deliveredDate || po.deliveredDate),
         materialType: cleanText(row.materialType || po.materialType),
         unitRate: number(row.itemPrice),
         taxPercent: number(row.itemTaxPercent),
         taxAmount,
         lineTotal,
         poTotal: roundMoney(number(po.poTotal) || lineTotal),
+        itemSubtotal: roundMoney(number(po.itemSubtotal)),
+        taxTotal: roundMoney(number(po.taxTotal)),
+        discountAmount: roundMoney(number(po.discountAmount)),
+        adjustmentAmount: roundMoney(number(po.adjustmentAmount)),
         amountPaid: roundMoney(number(po.amountPaid)),
         balanceDue: roundMoney(number(po.balanceDue)),
-        paymentStatus: normalizePaymentStatus(row.paymentStatus || po.paymentStatus),
-        poStatus: normalizePoStatus(row.poStatus || po.poStatus),
+        paymentStatus: normalizePaymentStatus(po.paymentStatus || row.paymentStatus),
+        poStatus: normalizePoStatus(po.poStatus || row.poStatus),
         deliveryStatus: displayDeliveryStatus({
           deliveryStatus: row.deliveryStatus || po.deliveryStatus,
           deliveryDate: row.deliveryDate || po.deliveryDate,
@@ -11528,33 +11582,42 @@ function handleProcurementAuditTableAction(event) {
 function renderReports(derived = buildDerived()) {
   const rows = buildProcurementReportRows(derived);
   const mechanicalAnalysis = buildMechanicalAnalysis(derived);
-  const totalValue = rows.reduce((sum, row) => sum + number(row.lineTotal), 0);
+  const totalValue = derived.pos.reduce((sum, po) => sum + number(po.poTotal), 0);
   const uniquePos = new Set(rows.map((row) => row.poNumber).filter(Boolean));
   const reportKpiGrid = document.getElementById("reportKpiGrid");
   if (reportKpiGrid) {
     reportKpiGrid.innerHTML = `
-      <article class="kpi-card kpi-cyan report-kpi-card" data-report-action="open-procurement" role="button" tabindex="0">
+      <article class="kpi-card kpi-cyan report-kpi-card">
         <div class="kpi-icon">${kpiIconSvg("file")}</div>
         <div class="kpi-content">
           <div class="kpi-label"><span>Procurement Report</span></div>
           <div class="kpi-value">${escapeHtml(formatNumber(rows.length))}</div>
           <div class="kpi-note">${escapeHtml(formatNumber(uniquePos.size))} POs · ${escapeHtml(compactMoney(totalValue))}</div>
+          <p class="report-card-description">Final PO totals, product and charge lines, vendor totals, and export notes.</p>
+          <span class="report-sheet-count">5 sheets · All purchase orders</span>
+          <div class="report-card-actions"><button class="ghost-btn" type="button" data-report-action="open-procurement">Preview report</button><button class="primary-btn" type="button" data-export-kind="procurement">Download XLSX</button></div>
         </div>
       </article>
-      <article class="kpi-card kpi-cyan report-kpi-card" data-report-action="open-mechanical" role="button" tabindex="0">
+      <article class="kpi-card kpi-cyan report-kpi-card">
         <div class="kpi-icon">${kpiIconSvg("shield")}</div>
         <div class="kpi-content">
           <div class="kpi-label"><span>Mechanical Procurement Analysis</span></div>
           <div class="kpi-value">${escapeHtml(compactMoney(mechanicalAnalysis.summary.mechanicalLanded))}</div>
-          <div class="kpi-note">${escapeHtml(formatNumber(mechanicalAnalysis.summary.lineCount))} lines - ${escapeHtml(formatNumber(mechanicalAnalysis.summary.mechanicalSpendPercent))}% of BOM</div>
+          <div class="kpi-note">${escapeHtml(formatNumber(mechanicalAnalysis.summary.lineCount))} lines · ${escapeHtml(formatNumber(mechanicalAnalysis.summary.mechanicalSpendPercent))}% landed / BOM base</div>
+          <p class="report-card-description">Mechanical costs, vendor analysis, lead times, freight, and sourcing opportunities.</p>
+          <span class="report-sheet-count">10 sheets · Every analysis tab</span>
+          <div class="report-card-actions"><button class="ghost-btn" type="button" data-report-action="open-mechanical">Preview analysis</button><button class="primary-btn" type="button" data-export-kind="mechanical">Download XLSX</button></div>
         </div>
       </article>
-      <article class="kpi-card kpi-cyan report-kpi-card" data-report-action="open-audit" role="button" tabindex="0">
+      <article class="kpi-card kpi-cyan report-kpi-card">
         <div class="kpi-icon">${kpiIconSvg("shield")}</div>
         <div class="kpi-content">
           <div class="kpi-label"><span>Procurement Audit Workspace</span></div>
           <div class="kpi-value">${escapeHtml(formatNumber(procurementAuditState().risks.filter((row) => normalizeKey(row.status) !== "CLOSED").length))}</div>
           <div class="kpi-note">Open risks - evidence-based audit records</div>
+          <p class="report-card-description">All audit tabs, invoice and payment records, receipts, risks, actions, and filling guide.</p>
+          <span class="report-sheet-count">14 sheets · All audit records</span>
+          <div class="report-card-actions"><button class="ghost-btn" type="button" data-report-action="open-audit">Preview audit</button><button class="primary-btn" type="button" data-export-kind="audit">Download XLSX</button></div>
         </div>
       </article>
     `;
@@ -11570,29 +11633,14 @@ function renderReports(derived = buildDerived()) {
   const body = document.getElementById("procurementReportBody");
   const summary = document.getElementById("procurementReportSummary");
   if (summary) {
-    summary.textContent = `${rows.length} line items across ${uniquePos.size} purchase orders. Export creates a formatted Excel workbook.`;
+    summary.textContent = `${rows.length} line items across ${uniquePos.size} purchase orders. PO totals appear once per order in PO Summary. The workbook includes all 5 sheets.`;
   }
-  if (head) {
-    head.innerHTML = `
-      <tr>${PROCUREMENT_REPORT_COLUMNS.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr>
-    `;
-  }
-  if (body) {
-    body.innerHTML = rows.length
-      ? rows
-          .map(
-            (row) => `
-              <tr>
-                ${PROCUREMENT_REPORT_COLUMNS.map(
-                  (column) =>
-                    `<td>${escapeHtml(reportDisplayValue(row[column.key], column.type))}</td>`,
-                ).join("")}
-              </tr>
-            `,
-          )
-          .join("")
-      : `<tr><td colspan="${PROCUREMENT_REPORT_COLUMNS.length}" class="empty-state">No procurement rows available.</td></tr>`;
-  }
+  const sheets = procurementWorkbookSheets(rows);
+  const selected = sheets.find(sheet => sheet.name === state.procurementReportTab) || sheets[1];
+  const tabs = document.getElementById("procurementReportTabs");
+  if (tabs) tabs.innerHTML = sheets.map(sheet => `<button type="button" class="report-tab${sheet.name === selected.name ? " active" : ""}" data-procurement-report-tab="${escapeHtml(sheet.name)}">${escapeHtml(sheet.name)}</button>`).join("");
+  if (head) head.innerHTML = `<tr>${selected.rows[0].map(cell => `<th>${escapeHtml(cell.value)}</th>`).join("")}</tr>`;
+  if (body) body.innerHTML = selected.rows.length > 1 ? selected.rows.slice(1).map(row => `<tr>${row.map(cell => `<td>${escapeHtml(reportDisplayValue(cell.value, cell.type))}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${selected.widths.length}" class="empty-state">No records available for this table.</td></tr>`;
 }
 
 function handleReportAction(event) {
@@ -11631,6 +11679,7 @@ function handleReportAction(event) {
 
 function xmlEscape(value) {
   return String(value ?? "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -11652,6 +11701,7 @@ function xlsxColumnName(index) {
 function addSharedString(sharedStrings, value) {
   const text = String(value ?? "");
   if (!sharedStrings) return null;
+  sharedStrings.count = (sharedStrings.count || 0) + 1;
   if (sharedStrings.map.has(text)) return sharedStrings.map.get(text);
   const index = sharedStrings.items.length;
   sharedStrings.map.set(text, index);
@@ -11662,7 +11712,7 @@ function addSharedString(sharedStrings, value) {
 function buildSharedStringsXml(sharedStrings) {
   const items = sharedStrings.items || [];
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${items.length}" uniqueCount="${items.length}">
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${sharedStrings.count || 0}" uniqueCount="${items.length}">
   ${items
     .map(
       (value) =>
@@ -11848,186 +11898,7 @@ function createZipBlob(files) {
 }
 
 function buildProcurementReportWorkbook(rows) {
-  const lastColumn = xlsxColumnName(PROCUREMENT_REPORT_COLUMNS.length - 1);
-  const tableStartRow = 6;
-  const firstDataRow = tableStartRow + 1;
-  const lastRow = Math.max(firstDataRow, firstDataRow + rows.length - 1);
-  const sharedStrings = { items: [], map: new Map() };
-  const totalLineValue = rows.reduce((sum, row) => sum + number(row.lineTotal), 0);
-  const totalBalance = rows.reduce((sum, row) => sum + number(row.balanceDue), 0);
-  const uniquePos = new Set(rows.map((row) => row.poNumber).filter(Boolean));
-  const generatedOn = new Intl.DateTimeFormat("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date());
-
-  const headerCells = PROCUREMENT_REPORT_COLUMNS.map((column) => ({
-    value: column.label,
-    style: 5,
-  }));
-  const dataRows = rows.map((row, rowOffset) =>
-    xlsxRow(
-      firstDataRow + rowOffset,
-      PROCUREMENT_REPORT_COLUMNS.map((column) => ({
-        value: row[column.key],
-        type: column.type,
-        style:
-          column.type === "money"
-            ? 7
-            : column.type === "number"
-              ? 8
-              : column.type === "percent"
-                ? 10
-                : 6,
-      })),
-      0,
-      sharedStrings,
-    ),
-  );
-
-  const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <dimension ref="A1:${lastColumn}${lastRow}"/>
-  <sheetViews><sheetView workbookViewId="0"><pane ySplit="6" topLeftCell="A7" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
-  <sheetFormatPr defaultRowHeight="18"/>
-  <cols>
-    ${PROCUREMENT_REPORT_COLUMNS.map((column, index) => `<col min="${index + 1}" max="${index + 1}" width="${column.width}" customWidth="1"/>`).join("")}
-  </cols>
-  <sheetData>
-    ${xlsxRow(1, [{ value: "Procurement Report", style: 1 }, ...Array(PROCUREMENT_REPORT_COLUMNS.length - 1).fill({ value: "", style: 1 })], 0, sharedStrings)}
-    ${xlsxRow(2, [{ value: `Generated ${generatedOn}`, style: 2 }, ...Array(PROCUREMENT_REPORT_COLUMNS.length - 1).fill({ value: "", style: 2 })], 0, sharedStrings)}
-    ${xlsxRow(4, [
-      { value: "Purchase Orders", style: 3 },
-      { value: uniquePos.size, type: "number", style: 4 },
-      { value: "Line Items", style: 3 },
-      { value: rows.length, type: "number", style: 4 },
-      { value: "Line Value", style: 3 },
-      { value: totalLineValue, type: "money", style: 7 },
-      { value: "Balance Due", style: 3 },
-      { value: totalBalance, type: "money", style: 7 },
-    ], 0, sharedStrings)}
-    ${xlsxRow(tableStartRow, headerCells, 0, sharedStrings)}
-    ${dataRows.join("")}
-  </sheetData>
-  <mergeCells count="2"><mergeCell ref="A1:${lastColumn}1"/><mergeCell ref="A2:${lastColumn}2"/></mergeCells>
-  <autoFilter ref="A${tableStartRow}:${lastColumn}${lastRow}"/>
-  <pageMargins left="0.4" right="0.4" top="0.6" bottom="0.6" header="0.3" footer="0.3"/>
-</worksheet>`;
-
-  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <numFmts count="3">
-    <numFmt numFmtId="164" formatCode="&quot;INR &quot;#,##0.00"/>
-    <numFmt numFmtId="165" formatCode="#,##0.00"/>
-    <numFmt numFmtId="166" formatCode="0.00%"/>
-  </numFmts>
-  <fonts count="4">
-    <font><sz val="11"/><color rgb="FF111827"/><name val="Aptos"/></font>
-    <font><b/><sz val="18"/><color rgb="FFFFFFFF"/><name val="Aptos Display"/></font>
-    <font><b/><sz val="11"/><color rgb="FF111827"/><name val="Aptos"/></font>
-    <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Aptos"/></font>
-  </fonts>
-  <fills count="5">
-    <fill><patternFill patternType="none"/></fill>
-    <fill><patternFill patternType="gray125"/></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FF111827"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFFFE500"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFF8FAFC"/><bgColor indexed="64"/></patternFill></fill>
-  </fills>
-  <borders count="2">
-    <border><left/><right/><top/><bottom/><diagonal/></border>
-    <border><left style="thin"><color rgb="FFE5E7EB"/></left><right style="thin"><color rgb="FFE5E7EB"/></right><top style="thin"><color rgb="FFE5E7EB"/></top><bottom style="thin"><color rgb="FFE5E7EB"/></bottom><diagonal/></border>
-  </borders>
-  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="11">
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-    <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="2" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
-    <xf numFmtId="165" fontId="2" fillId="4" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
-    <xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
-    <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>
-    <xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>
-    <xf numFmtId="166" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>
-  </cellXfs>
-  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
-</styleSheet>`;
-
-  const sharedStringsXml = buildSharedStringsXml(sharedStrings);
-
-  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets><sheet name="Procurement Report" sheetId="1" r:id="rId1"/></sheets>
-</workbook>`;
-
-  return createZipBlob([
-    {
-      name: "[Content_Types].xml",
-      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
-  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
-</Types>`,
-    },
-    {
-      name: "_rels/.rels",
-      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
-</Relationships>`,
-    },
-    {
-      name: "docProps/core.xml",
-      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <dc:title>Procurement Report</dc:title>
-  <dc:creator>Stack n Stock Procurement Dashboard</dc:creator>
-  <dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created>
-</cp:coreProperties>`,
-    },
-    {
-      name: "docProps/app.xml",
-      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>Stack n Stock Procurement Dashboard</Application>
-</Properties>`,
-    },
-    {
-      name: "xl/workbook.xml",
-      content: workbookXml,
-    },
-    {
-      name: "xl/_rels/workbook.xml.rels",
-      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
-</Relationships>`,
-    },
-    {
-      name: "xl/styles.xml",
-      content: stylesXml,
-    },
-    {
-      name: "xl/sharedStrings.xml",
-      content: sharedStringsXml,
-    },
-    {
-      name: "xl/worksheets/sheet1.xml",
-      content: sheetXml,
-    },
-  ]);
+  return buildReportWorkbook(procurementWorkbookSheets(rows), "Procurement Report");
 }
 
 function buildSourcingAuditWorkbook() {
@@ -12331,9 +12202,10 @@ function buildSourcingAuditWorkbook() {
     if (!receiptsByPo.has(key)) receiptsByPo.set(key, []);
     receiptsByPo.get(key).push(receipt);
   });
-  const moneySourceRows = auditData.payments.length
-    ? auditData.payments
-    : auditData.invoices.map((invoice) => ({
+  const paidInvoiceIds = new Set(auditData.payments.map(payment => cleanText(payment.invoiceId)).filter(Boolean));
+  const moneySourceRows = [
+    ...auditData.payments,
+    ...auditData.invoices.filter(invoice => !paidInvoiceIds.has(cleanText(invoice.id))).map((invoice) => ({
         id: `invoice-${invoice.id}`,
         poNumber: invoice.poNumber,
         invoiceId: invoice.id,
@@ -12344,7 +12216,8 @@ function buildSourcingAuditWorkbook() {
         proofAvailable: "No",
         approved: "No",
         remarks: "Invoice captured; payment not recorded.",
-      }));
+      })),
+  ];
   const moneyRows = moneySourceRows.map((payment) => {
     const po = poByNumber.get(cleanText(payment.poNumber)) || {};
     const invoice = invoiceById.get(cleanText(payment.invoiceId)) || {};
@@ -12513,77 +12386,19 @@ function buildSourcingAuditWorkbook() {
     { name: "How to Fill", widths: [16, 36, 24, 42, 22, 35, 16, 16], rows: howRows, merges: ["A1:H1", "A3:H3", "A11:H11", "A22:H22", "A31:H31", "A42:H42"] },
   ];
 
-  function validationsXml(validations = []) {
-    if (!validations.length) return "";
-    return `<dataValidations count="${validations.length}">${validations
-      .map(([sqref, formula]) => `<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="${xmlEscape(sqref)}"><formula1>${xmlEscape(formula)}</formula1></dataValidation>`)
-      .join("")}</dataValidations>`;
-  }
-
-  function worksheetXml(spec) {
-    const colCount = spec.widths.length;
-    const rowCount = Math.max(1, spec.rows.length);
-    const rowsXml = spec.rows
-      .map((row, rowIndex) => {
-        const padded = Array.from({ length: colCount }, (_, index) => row[index] || cell(""));
-        return xlsxRow(rowIndex + 1, padded, 0, sharedStrings);
-      })
-      .join("");
-    const merges = spec.merges?.length
-      ? `<mergeCells count="${spec.merges.length}">${spec.merges.map((ref) => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells>`
-      : "";
-    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <dimension ref="A1:${xlsxColumnName(colCount - 1)}${rowCount}"/>
-  <sheetFormatPr defaultRowHeight="18"/>
-  <cols>${spec.widths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("")}</cols>
-  <sheetData>${rowsXml}</sheetData>
-  ${merges}
-  ${validationsXml(spec.validations)}
-  <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
-</worksheet>`;
-  }
-
-  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <numFmts count="3"><numFmt numFmtId="164" formatCode="&quot;INR &quot;#,##0.00"/><numFmt numFmtId="165" formatCode="#,##0.00"/><numFmt numFmtId="166" formatCode="0.00%"/></numFmts>
-  <fonts count="5"><font><sz val="11"/><color rgb="FF111827"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FF111827"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="14"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><sz val="11"/><color rgb="FF111827"/><name val="Calibri"/></font></fonts>
-  <fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE0F2F1"/><bgColor indexed="64"/></patternFill></fill></fills>
-  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
-  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="10">
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-    <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
-    <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
-    <xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
-    <xf numFmtId="0" fontId="3" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="top" wrapText="1"/></xf>
-    <xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
-  </cellXfs>
-  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
-</styleSheet>`;
-
-  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((sheet, index) => `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("")}</sheets><calcPr fullCalcOnLoad="1"/></workbook>`;
-  const sheetFiles = sheets.map((sheet, index) => ({
-    name: `xl/worksheets/sheet${index + 1}.xml`,
-    content: worksheetXml(sheet),
-  }));
-  const sharedStringsXml = buildSharedStringsXml(sharedStrings);
-
-  return createZipBlob([
-    { name: "[Content_Types].xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>` },
-    { name: "_rels/.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>` },
-    { name: "docProps/core.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Sourcing Money Audit with SOP</dc:title><dc:creator>Stack n Stock Procurement Dashboard</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created></cp:coreProperties>` },
-    { name: "docProps/app.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Stack n Stock Procurement Dashboard</Application></Properties>` },
-    { name: "xl/workbook.xml", content: workbookXml },
-    { name: "xl/_rels/workbook.xml.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId${sheets.length + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>` },
-    { name: "xl/styles.xml", content: stylesXml },
-    { name: "xl/sharedStrings.xml", content: sharedStringsXml },
-    ...sheetFiles,
-  ]);
+  sheets.unshift(reportExportInfo("Procurement Audit", [
+    "All 11 Audit Workspace tabs are included, plus Money Spent Audit and How to Fill.",
+    "Payment and receipt evidence is exported separately from PO payment status. Missing evidence is not proof of non-payment.",
+    "Money Spent Audit may repeat invoice and receipt amounts across payment rows. Use Invoices, Payments and Receipts for independent totals.",
+    "KPI Summary is a snapshot at export time. Formula columns in Line Item Audit and Vendor Audit recalculate in Excel.",
+  ]));
+  sheets.push(...auditEvidenceSheets());
+  const documentSheet = reportSheet("Missing Documents",
+    PROCUREMENT_AUDIT_CONFIG["Missing Documents"].fields.filter(field => !field.hidden),
+    buildProcurementAuditRows("Missing Documents", derived));
+  const documentIndex = sheets.findIndex(sheet => sheet.name === "Missing Documents");
+  sheets[documentIndex] = { ...documentSheet, validations: sheets[documentIndex].validations };
+  return buildReportWorkbook(sheets, "Procurement Audit");
 }
 
 function mechanicalAnalysisRowsForSheet(sheetName, rows) {
@@ -12606,122 +12421,20 @@ function mechanicalAnalysisRowsForSheet(sheetName, rows) {
 }
 
 function buildMechanicalAnalysisWorkbook() {
-  const sharedStrings = { items: [], map: new Map() };
   const analysis = buildMechanicalAnalysis(buildDerived());
-  const sheets = MECHANICAL_ANALYSIS_TABS.map((sheetName) => {
-    const columns = MECHANICAL_ANALYSIS_COLUMNS[sheetName] || [];
-    return {
-      name: sheetName,
-      widths: columns.map((column) => column.width || 18),
-      rows: mechanicalAnalysisRowsForSheet(sheetName, analysis.tables[sheetName] || []),
-    };
-  });
-  function cell(value = "", type = "text", style = 0) {
-    return { value, type, style };
-  }
-  function worksheetXml(spec) {
-    const colCount = Math.max(1, spec.widths.length);
-    const rowCount = Math.max(1, spec.rows.length);
-    const rowsXml = spec.rows
-      .map((row, rowIndex) => {
-        const padded = Array.from({ length: colCount }, (_, index) => row[index] || cell(""));
-        return xlsxRow(rowIndex + 1, padded, 0, sharedStrings);
-      })
-      .join("");
-    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <dimension ref="A1:${xlsxColumnName(colCount - 1)}${rowCount}"/>
-  <sheetFormatPr defaultRowHeight="18"/>
-  <cols>${spec.widths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("")}</cols>
-  <sheetData>${rowsXml}</sheetData>
-  <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
-</worksheet>`;
-  }
-  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <numFmts count="2"><numFmt numFmtId="164" formatCode="&quot;INR &quot;#,##0.00"/><numFmt numFmtId="165" formatCode="#,##0.00"/></numFmts>
-  <fonts count="3"><font><sz val="11"/><color rgb="FF111827"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="12"/><color rgb="FF111827"/><name val="Calibri"/></font></fonts>
-  <fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor indexed="64"/></patternFill></fill></fills>
-  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
-  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="5">
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-    <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
-    <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
-    <xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
-  </cellXfs>
-  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
-</styleSheet>`;
-  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((sheet, index) => `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("")}</sheets><calcPr fullCalcOnLoad="1"/></workbook>`;
-  const sheetFiles = sheets.map((sheet, index) => ({
-    name: `xl/worksheets/sheet${index + 1}.xml`,
-    content: worksheetXml(sheet),
-  }));
-  const sharedStringsXml = buildSharedStringsXml(sharedStrings);
-  return createZipBlob([
-    { name: "[Content_Types].xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>` },
-    { name: "_rels/.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>` },
-    { name: "docProps/core.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Mechanical Procurement Analysis</dc:title><dc:creator>Stack n Stock Procurement Dashboard</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created></cp:coreProperties>` },
-    { name: "docProps/app.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Stack n Stock Procurement Dashboard</Application></Properties>` },
-    { name: "xl/workbook.xml", content: workbookXml },
-    { name: "xl/_rels/workbook.xml.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId${sheets.length + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>` },
-    { name: "xl/styles.xml", content: stylesXml },
-    { name: "xl/sharedStrings.xml", content: sharedStringsXml },
-    ...sheetFiles,
-  ]);
+  const sheets = MECHANICAL_ANALYSIS_TABS.map(name =>
+    reportSheet(name, MECHANICAL_ANALYSIS_COLUMNS[name], analysis.tables[name] || []));
+  sheets.push(reportExportInfo("Mechanical Procurement Analysis", [
+    "Includes every analysis tab, not just the tab currently shown on screen.",
+    "Mechanical landed cost includes tax and allocated freight. BOM base value excludes tax and freight; this ratio can exceed 100%.",
+    "Classification and opportunities are generated from descriptions. Review them before sourcing decisions.",
+  ]));
+  return buildReportWorkbook(sheets, "Mechanical Procurement Analysis");
 }
 
-function exportMechanicalAnalysisXlsx() {
-  const analysis = buildMechanicalAnalysis(buildDerived());
-  if (!analysis.summary.lineCount) {
-    alert("No mechanical procurement data is available to export.");
-    return;
-  }
-  const blob = buildMechanicalAnalysisWorkbook();
-  const link = document.createElement("a");
-  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  link.href = URL.createObjectURL(blob);
-  link.download = `mechanical-procurement-analysis-${timestamp}.xlsx`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-}
-
-function exportProcurementReportXlsx() {
-  const rows = buildProcurementReportRows(buildDerived());
-  if (!rows.length) {
-    alert("No procurement data is available to export.");
-    return;
-  }
-  const blob = buildProcurementReportWorkbook(rows);
-  const link = document.createElement("a");
-  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  link.href = URL.createObjectURL(blob);
-  link.download = `procurement-report-${timestamp}.xlsx`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-}
-
-function exportProcurementAuditXlsx() {
-  const derived = buildDerived();
-  if (!(derived.pos || []).length) {
-    alert("No procurement data is available to export.");
-    return;
-  }
-  const blob = buildSourcingAuditWorkbook();
-  const link = document.createElement("a");
-  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  link.href = URL.createObjectURL(blob);
-  link.download = `procurement-audit-workbook-${timestamp}.xlsx`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-}
+function exportMechanicalAnalysisXlsx() { return runReportExport("mechanical"); }
+function exportProcurementReportXlsx() { return runReportExport("procurement"); }
+function exportProcurementAuditXlsx() { return runReportExport("audit"); }
 
 function importLocalState(event) {
   const file = event.target.files?.[0];
@@ -13629,6 +13342,7 @@ function bindTabs() {
 
 function bindFilters() {
   const specs = [
+    ["overviewPeriodFilter", "change", (value) => (state.filters.poPeriod = value)],
     ["poSearch", "input", (value) => (state.filters.poSearch = value)],
     ["poVendorFilter", "change", (value) => (state.filters.poVendor = value)],
     ["poPaymentFilter", "change", (value) => (state.filters.poPayment = value)],
@@ -13729,13 +13443,6 @@ function bindGlobalEvents() {
   document
     .getElementById("reportKpiGrid")
     ?.addEventListener("click", handleReportAction);
-  document
-    .getElementById("reportKpiGrid")
-    ?.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      handleReportAction(event);
-    });
   document
     .getElementById("mechanicalAnalysisTabs")
     ?.addEventListener("click", (event) => {
@@ -14390,9 +14097,15 @@ async function init() {
   bindFilters();
   bindGlobalEvents();
   bindProductMasterEvents();
+  bindReportExports();
+  reportDataLoading = hasSupabaseConfig();
   renderAll();
-  if (hasSupabaseConfig() && (useSupabase || (await loadSupabaseSdk()))) {
-    await refreshStateFromSupabase({ generateFollowups: true });
+  try {
+    if (hasSupabaseConfig() && (useSupabase || (await loadSupabaseSdk()))) {
+      await refreshStateFromSupabase({ generateFollowups: true });
+    }
+  } finally {
+    reportDataLoading = false;
   }
 }
 

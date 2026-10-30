@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=reports-20261030-r2" />
   <script src="config.js"></script>
 </head>
 <body>
@@ -146,10 +146,10 @@
             </div>
             <div class="po-command-primary">
               <select class="control-input compact-select" id="overviewPeriodFilter" aria-label="Purchase order time period">
-                <option>This Month</option>
-                <option>This Week</option>
-                <option>Today</option>
-                <option>All Time</option>
+                <option value="month">This Month</option>
+                <option value="week">This Week</option>
+                <option value="today">Today</option>
+                <option value="all" selected>All Time</option>
               </select>
               <button class="primary-btn" id="openAddPoBtn">Add Purchase Order</button>
             </div>
@@ -412,10 +412,15 @@
         <div class="tab-page-header">
           <div>
             <h1>Reports</h1>
-            <p>Export-ready procurement reporting from the full PO line-item dataset.</p>
+            <p>Review procurement performance and download complete reports for your team.</p>
           </div>
+          <button class="primary-btn" id="exportAllReportsBtn" type="button">Download all reports · ZIP</button>
         </div>
-
+        <div class="report-export-banner">
+          <div><strong>One place for every export</strong><p>Excel workbooks include every sheet. CSV downloads contain the selected table. All exports use the full loaded dataset.</p></div>
+          <span class="report-export-badge">XLSX · CSV · ZIP</span>
+        </div>
+        <p class="report-export-status" id="reportExportStatus" role="status" aria-live="polite">Choose a report below to preview its tables or download the full workbook.</p>
         <section class="kpi-grid report-kpi-grid" id="reportKpiGrid"></section>
 
         <article class="panel report-table-panel hidden" id="procurementReportPanel">
@@ -425,9 +430,11 @@
               <p class="section-copy" id="procurementReportSummary">All purchase order item and charge lines.</p>
             </div>
             <div class="toolbar">
+              <button class="ghost-btn" data-report-csv="procurement" type="button">Download selected tab · CSV</button>
               <button class="primary-btn" id="exportProcurementReportBtn" type="button">Export XLSX</button>
             </div>
           </div>
+          <div class="report-tab-strip" id="procurementReportTabs"></div>
           <div class="table-wrap report-table-wrap">
             <table class="report-table">
               <thead id="procurementReportHead"></thead>
@@ -443,6 +450,7 @@
               <p class="section-copy" id="mechanicalAnalysisSummary">Mechanical sourcing analysis from current PO data.</p>
             </div>
             <div class="toolbar">
+              <button class="ghost-btn" data-report-csv="mechanical" type="button">Download selected tab · CSV</button>
               <button class="primary-btn" id="exportMechanicalAnalysisBtn" type="button">Export Mechanical XLSX</button>
             </div>
           </div>
@@ -464,6 +472,7 @@
             </div>
             <div class="toolbar">
               <button class="ghost-btn" id="addProcurementAuditRecordBtn" type="button">Add Record</button>
+              <button class="ghost-btn" data-report-csv="audit" type="button">Download selected tab · CSV</button>
               <button class="primary-btn" id="exportProcurementAuditBtn" type="button">Export Audit XLSX</button>
             </div>
           </div>
@@ -1139,6 +1148,7 @@
   </div>
 
   <script src="data.js"></script>
-  <script src="app.js"></script>
+  <script src="report-export.js?v=reports-20261030-r2"></script>
+  <script src="app.js?v=reports-20261030-r2"></script>
 </body>
 </html>
